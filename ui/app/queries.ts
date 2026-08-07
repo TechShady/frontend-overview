@@ -1,45 +1,44 @@
 import { periodClause, webAppFilterClause } from "./SettingsContext";
 
-// ---------------------------------------------------------------------------
-// Every query in this module aggregates by `application` (web app name).
-// A single-web-app filter can be applied via the `selected` parameter.
-// ---------------------------------------------------------------------------
+// Every query aggregates by `application` — actual DQL field is `frontend.name`
+// (or `dt.entity.application` for metrics). Consumers use `application` uniformly.
 
-// Discover every web app in the tenant (used to populate the filter dropdown).
+// Discover every web app — powers the filter dropdown.
 export function webAppInventoryQuery(days: number): string {
   return `
-    fetch usersession, ${periodClause(days)}
-    | filter isNotNull(application)
-    | summarize sessions = count(), users = countDistinctExact(userId), by:{application}
-    | sort sessions desc
-    | limit 200
-  `;
-}
-
-// Executive Summary — per web app aggregate for grading.
-export function webAppSummaryQuery(days: number, selected: string | null, prev = false): string {
-  return `
-    fetch usersession, ${periodClause(days, prev)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)
     | summarize
-        sessions = count(),
-        users = countDistinctExact(userId),
-        actions = sum(userActionCount),
-        errors = sum(errorCount),
-        avgDuration = avg(duration),
-        bounces = countIf(userActionCount <= 1),
-        newUsers = countIf(userType == "NEW_USER"),
-        by:{application}
-    | fieldsAdd errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100
-    | fieldsAdd bounceRate = (toDouble(bounces) / (toDouble(sessions) + 0.0001)) * 100
+        sessions = countDistinct(dt.rum.session.id),
+        actions = count(),
+        by:{application = frontend.name}
     | sort sessions desc
     | limit 200
   `;
 }
 
-// Core Web Vitals (RUM metrics) per web app — average.
+// Per-web-app aggregate for grading.
+export function webAppSummaryQuery(days: number, selected: string | null, prev = false): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days, prev)}
+    | filter isNotNull(frontend.name)${filt}
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        users = countDistinct(dt.rum.user.id),
+        actions = count(),
+        errors = countIf(event.type == "ERROR"),
+        avgDuration = avg(duration),
+        by:{application = frontend.name}
+    | fieldsAdd errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100
+    | sort sessions desc
+    | limit 200
+  `;
+}
+
+// Core Web Vitals per web app — metric-based.
 export function webVitalsPerAppQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` | filter dt.entity.application != "" and application_name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const filt = selected ? ` | filter application == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
     timeseries {
       lcp = avg(dt.rum.largest_contentful_paint),
@@ -49,7 +48,7 @@ export function webVitalsPerAppQuery(days: number, selected: string | null): str
     },
     by:{dt.entity.application},
     ${periodClause(days)}
-    | fieldsAdd application_name = entityName(dt.entity.application)
+    | fieldsAdd application = entityName(dt.entity.application)
     ${filt}
     | fieldsAdd
         lcpAvg = arrayAvg(lcp),
@@ -61,32 +60,33 @@ export function webVitalsPerAppQuery(days: number, selected: string | null): str
   `;
 }
 
-// Web vitals fallback — computes from user actions when metric series are absent.
+// Fallback: computed from user events when metrics are absent.
 export function webVitalsFromEventsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch usersession, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
     | summarize
-        lcpAvg = avg(userExperienceScore),
-        actions = sum(userActionCount),
-        sessions = count(),
-        by:{application}
+        actions = count(),
+        sessions = countDistinct(dt.rum.session.id),
+        by:{application = frontend.name}
     | sort sessions desc
     | limit 200
   `;
 }
 
-// Failure / error rate per web app — % of failed actions.
+// Failure / error rate per web app.
 export function errorsPerAppQuery(days: number, selected: string | null, prev = false): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch usersession, ${periodClause(days, prev)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days, prev)}
+    | filter isNotNull(frontend.name)${filt}
     | summarize
-        totalActions = sum(userActionCount),
-        totalErrors = sum(errorCount),
-        sessions = count(),
-        errSessions = countIf(errorCount > 0),
-        by:{application}
+        totalActions = count(),
+        totalErrors = countIf(event.type == "ERROR"),
+        sessions = countDistinct(dt.rum.session.id),
+        errSessions = countDistinctIf(dt.rum.session.id, event.type == "ERROR"),
+        by:{application = frontend.name}
     | fieldsAdd
         errorRate = (toDouble(totalErrors) / (toDouble(totalActions) + 0.0001)) * 100,
         errSessionsPct = (toDouble(errSessions) / (toDouble(sessions) + 0.0001)) * 100
@@ -95,29 +95,29 @@ export function errorsPerAppQuery(days: number, selected: string | null, prev = 
   `;
 }
 
-// Top pages per web app (navigation flows without any journey concept).
+// Top pages per web app.
 export function topPagesQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch dt.rum.action, ${periodClause(days)}
-    | filter isNotNull(application) and isNotNull(name)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(view.name) and event.type == "ACTION"${filt}
     | summarize
         views = count(),
         avgDuration = avg(duration),
-        errors = sum(if(errorCount > 0, errorCount, 0)),
-        by:{application, name, type}
+        by:{application = frontend.name, name = view.name}
     | sort views desc
     | limit 500
   `;
 }
 
-// Page transitions — actual navigation flows per web app. Uses a self-lookup
-// on session id to derive "next page" from consecutive actions.
+// Page transitions — actual navigation flows per web app.
 export function pageTransitionsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch dt.rum.action, ${periodClause(days)}
-    | filter isNotNull(application) and isNotNull(name)${webAppFilterClause(selected)}
-    | sort sessionId asc, startTime asc
-    | fields application, sessionId, page = name, ts = startTime
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(view.name) and event.type == "ACTION"${filt}
+    | sort dt.rum.session.id asc, timestamp asc
+    | fields application = frontend.name, sessionId = dt.rum.session.id, page = view.name, ts = timestamp
     | fieldsAdd nextPage = shift(page, by:-1, defaultValue:""), nextSession = shift(sessionId, by:-1, defaultValue:"")
     | filter sessionId == nextSession and nextPage != "" and nextPage != page
     | summarize transitions = count(), by:{application, page, nextPage}
@@ -126,36 +126,37 @@ export function pageTransitionsQuery(days: number, selected: string | null): str
   `;
 }
 
-// Resource consumption per web app — total bytes/requests. Core of the "who's
-// consuming the most" story.
+// Resource consumption per web app.
 export function resourceConsumptionQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch dt.rum.action, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and event.type == "LOAD"${filt}
     | summarize
         pageViews = count(),
-        totalBytes = sum(coalesce(networkBytes, 0)),
-        totalRequests = sum(coalesce(networkRequests, 0)),
-        avgBytesPerView = avg(coalesce(networkBytes, 0)),
-        avgRequestsPerView = avg(coalesce(networkRequests, 0)),
-        avgDomComplete = avg(coalesce(domCompleteTime, 0)),
-        by:{application}
+        totalBytes = sum(coalesce(view.network.bytes, 0)),
+        totalRequests = sum(coalesce(view.network.requests, 0)),
+        avgBytesPerView = avg(coalesce(view.network.bytes, 0)),
+        avgRequestsPerView = avg(coalesce(view.network.requests, 0)),
+        avgDomComplete = avg(coalesce(view.dom_complete, 0)),
+        by:{application = frontend.name}
     | sort totalBytes desc
     | limit 200
   `;
 }
 
-// Third-party impact per web app — inferred from action resource metadata.
+// Third-party impact per web app.
 export function thirdPartyImpactQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch dt.rum.action, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and event.type == "LOAD"${filt}
     | summarize
         totalActions = count(),
-        totalBytes = sum(coalesce(networkBytes, 0)),
-        thirdPartyBytes = sum(coalesce(thirdPartyBytes, 0)),
-        thirdPartyRequests = sum(coalesce(thirdPartyRequests, 0)),
-        by:{application}
+        totalBytes = sum(coalesce(view.network.bytes, 0)),
+        thirdPartyBytes = sum(coalesce(view.third_party.bytes, 0)),
+        thirdPartyRequests = sum(coalesce(view.third_party.requests, 0)),
+        by:{application = frontend.name}
     | fieldsAdd
         thirdPartyBytesPct = (toDouble(thirdPartyBytes) / (toDouble(totalBytes) + 0.0001)) * 100
     | sort thirdPartyBytesPct desc
@@ -163,40 +164,43 @@ export function thirdPartyImpactQuery(days: number, selected: string | null): st
   `;
 }
 
-// Traffic timeseries per web app — used for sparklines and trend view.
+// Traffic timeseries per web app.
 export function trafficTimeseriesQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` | filter application == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
     timeseries sessions = count(),
       by:{dt.entity.application},
       filter:{event.kind == "RUM_EVENT"},
       ${periodClause(days)}
-    | fieldsAdd application_name = entityName(dt.entity.application)
-    ${selected ? ` | filter application_name == "${selected.replace(/"/g, '\\"')}"` : ""}
+    | fieldsAdd application = entityName(dt.entity.application)
+    ${filt}
     | limit 200
   `;
 }
 
-// Session-count timeseries as fallback (event-based, not metric-based).
+// Session-count timeseries fallback (event-based).
 export function sessionsTimeseriesQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch usersession, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
-    | makeTimeseries sessions = count(), by:{application}, time:startTime, interval:auto
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and event.type == "LOAD"${filt}
+    | makeTimeseries sessions = countDistinct(dt.rum.session.id), by:{application = frontend.name}, time:timestamp, interval:auto
     | limit 200
   `;
 }
 
 // Geo breakdown per web app.
 export function geoPerAppQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch usersession, ${periodClause(days)}
-    | filter isNotNull(application) and isNotNull(country)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(geolocation.country)${filt}
     | summarize
-        sessions = count(),
-        users = countDistinctExact(userId),
-        errors = sum(errorCount),
+        sessions = countDistinct(dt.rum.session.id),
+        users = countDistinct(dt.rum.user.id),
+        errors = countIf(event.type == "ERROR"),
         avgDuration = avg(duration),
-        by:{application, country}
+        by:{application = frontend.name, country = geolocation.country}
     | sort sessions desc
     | limit 1000
   `;
@@ -204,14 +208,20 @@ export function geoPerAppQuery(days: number, selected: string | null): string {
 
 // Devices / browsers per web app.
 export function deviceBreakdownQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch usersession, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
     | summarize
-        sessions = count(),
-        errors = sum(errorCount),
+        sessions = countDistinct(dt.rum.session.id),
+        errors = countIf(event.type == "ERROR"),
         avgDuration = avg(duration),
-        by:{application, browserFamily, osFamily, deviceType = if(isNotNull(devicetype), devicetype, "Unknown")}
+        by:{
+          application = frontend.name,
+          browserFamily = coalesce(user_agent.family, "Unknown"),
+          osFamily = coalesce(os.name, "Unknown"),
+          deviceType = coalesce(device.type, "Unknown")
+        }
     | sort sessions desc
     | limit 500
   `;
@@ -219,13 +229,14 @@ export function deviceBreakdownQuery(days: number, selected: string | null): str
 
 // JS errors per web app.
 export function jsErrorsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch dt.rum.error, ${periodClause(days)}
-    | filter isNotNull(application)${webAppFilterClause(selected)}
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and event.type == "ERROR"${filt}
     | summarize
         errors = count(),
-        affectedSessions = countDistinctExact(sessionId),
-        by:{application, errorMessage = coalesce(errorMessage, name, "Unknown")}
+        affectedSessions = countDistinct(dt.rum.session.id),
+        by:{application = frontend.name, errorMessage = coalesce(error.message, error.name, "Unknown")}
     | sort errors desc
     | limit 500
   `;
