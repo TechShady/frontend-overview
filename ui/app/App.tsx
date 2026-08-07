@@ -5,7 +5,7 @@ import { Flex } from "@dynatrace/strato-components/layouts";
 import { Text, Strong, Paragraph } from "@dynatrace/strato-components/typography";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Sheet } from "@dynatrace/strato-components/overlays";
-import { Select, SelectOption } from "@dynatrace/strato-components-preview/forms";
+import { Select } from "@dynatrace/strato-components/forms";
 import { Switch } from "@dynatrace/strato-components/forms";
 
 import {
@@ -86,10 +86,12 @@ const AppHeader: React.FC<{
               setWebAppFilter({ selected: !first || first === "__ALL__" ? null : String(first) });
             }}
           >
-            <SelectOption value="__ALL__">All web apps (compare)</SelectOption>
-            {webApps.map((a) => (
-              <SelectOption key={a.name} value={a.name}>{a.name} ({a.sessions.toLocaleString()})</SelectOption>
-            ))}
+            <Select.Content>
+              <Select.Option value="__ALL__">All web apps (compare)</Select.Option>
+              {webApps.map((a) => (
+                <Select.Option key={a.name} value={a.name}>{a.name} ({a.sessions.toLocaleString()})</Select.Option>
+              ))}
+            </Select.Content>
           </Select>
         </div>
 
@@ -103,9 +105,11 @@ const AppHeader: React.FC<{
               if (first != null) setTimeframeDays(Number(first));
             }}
           >
-            {TIMEFRAME_OPTIONS.map((tf) => (
-              <SelectOption key={tf.value} value={String(tf.value)}>{tf.label}</SelectOption>
-            ))}
+            <Select.Content>
+              {TIMEFRAME_OPTIONS.map((tf) => (
+                <Select.Option key={tf.value} value={String(tf.value)}>{tf.label}</Select.Option>
+              ))}
+            </Select.Content>
           </Select>
         </div>
 
@@ -136,9 +140,11 @@ const AppHeader: React.FC<{
               if (first != null) setRefreshIntervalMs(Number(first));
             }}
           >
-            {REFRESH_OPTIONS.map((r) => (
-              <SelectOption key={r.value} value={String(r.value)}>{r.label}</SelectOption>
-            ))}
+            <Select.Content>
+              {REFRESH_OPTIONS.map((r) => (
+                <Select.Option key={r.value} value={String(r.value)}>{r.label}</Select.Option>
+              ))}
+            </Select.Content>
           </Select>
         </div>
 
