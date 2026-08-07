@@ -1,0 +1,1769 @@
+{
+  "$id": "CliOptions",
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$ref": "#/definitions/CliOptions",
+  "definitions": {
+    "CliOptions": {
+      "type": "object",
+      "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "JSON Schema reference for IDE support"
+        },
+        "environmentUrl": {
+          "type": "string",
+          "description": "URL to the environment of the project.",
+          "format": "url",
+          "errorMessage": "must contain a valid 'environmentUrl'. Please specify one in your 'app.config.(json|js|ts|cts)' file"
+        },
+        "build": {
+          "$ref": "#/definitions/AppBuildOptions",
+          "description": "Configuration options for the build process including source paths, output settings, bundling behavior, and asset management. Controls how your app is compiled and packaged."
+        },
+        "app": {
+          "$ref": "#/definitions/AppOptions",
+          "description": "Core application metadata and configuration including app ID, name, version, description, permissions, intents, actions, and other manifest properties required for app registration."
+        },
+        "injectSdk": {
+          "type": "boolean",
+          "description": "Controls whether the Dynatrace SDK is automatically injected into your application. When enabled, provides access to Dynatrace platform APIs and services.",
+          "default": true
+        },
+        "server": {
+          "$ref": "#/definitions/ServerOptions",
+          "description": "Development server configuration including port, host, SSL settings, and CSP options. Used when running the app locally during development."
+        },
+        "plugins": {
+          "type": "array",
+          "description": "ESBuild plugins for customizing the build process"
+        }
+      },
+      "required": [
+        "environmentUrl",
+        "app"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Main configuration object for the dt-app toolkit. The toolkit automatically resolves a config file named `app.config.json` from the project's root directory when running commands. This type defines all available configuration options for building, serving, and managing Dynatrace apps.",
+      "errorMessage": {
+        "required": {
+          "environmentUrl": "must contain a valid 'environmentUrl'. Please specify one in your 'app.config.(json|js|ts|cts)' file"
+        }
+      }
+    },
+    "AppBuildOptions": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "string",
+          "description": "Path to the main HTML entry point file, relative to the project root. This file serves as the template for the generated application.",
+          "default": "ui/index.html",
+          "format": "relative-path",
+          "errorMessage": "must be a relative path"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "production",
+            "development"
+          ],
+          "description": "Whether the build should be performed in production or development mode.",
+          "default": "'production' when building and 'development' when using development server"
+        },
+        "sourceMaps": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "all"
+            }
+          ],
+          "description": "Output source maps for app code and libraries. If set to 'true', only source maps for app code is included. Source maps for node_modules are included if the option is set to 'all'. By default, the option is treated as 'all' for development and 'false' for builds.",
+          "default": "undefined",
+          "errorMessage": "must be one of the following values: true, false, 'all'"
+        },
+        "namedChunks": {
+          "type": "boolean",
+          "description": "Use readable chunk names instead of content hashes in optimized builds. Useful for comparing bundles across builds (e.g. in PR pipelines) and for debugging. Only has an effect when using --optimize. The dev server never obfuscates chunk names regardless of this setting.",
+          "default": false
+        },
+        "sourceRoot": {
+          "type": "string",
+          "description": "Location of source files.",
+          "default": "./"
+        },
+        "baseHref": {
+          "type": "string",
+          "description": "Base path for application assets in the final build output. Used to configure routing and asset loading in the deployed application.",
+          "default": "ui/"
+        },
+        "ui": {
+          "type": "object",
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "properties": {
+            "plugins": {
+              "type": "array",
+              "description": "ESBuild plugins for customizing the build process"
+            },
+            "assets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "glob": {
+                    "type": "string",
+                    "description": "Glob pattern specifying which files to include from the input directory. Use UNIX-style path separators ('/') regardless of operating system. Supports standard glob syntax like wildcards (*) and directory recursion (**).",
+                    "format": "valid-glob",
+                    "errorMessage": "has to be a glob pattern"
+                  },
+                  "ignore": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "valid-glob",
+                      "errorMessage": {
+                        "format": "has to be a glob pattern"
+                      }
+                    },
+                    "description": "Array of glob patterns for files to exclude from the asset bundle. Useful for filtering out development files, tests, or temporary resources."
+                  },
+                  "input": {
+                    "type": "string",
+                    "description": "Source directory containing the assets to be processed. Can be relative to project root or an absolute file system path. All glob patterns are executed within this directory."
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "Destination directory where assets will be copied in the build output. Path is relative to the build distribution directory (distDir). Maintains directory structure from the input folder.",
+                    "format": "relative-path",
+                    "errorMessage": "must be a relative path"
+                  }
+                },
+                "required": [
+                  "glob",
+                  "input",
+                  "output"
+                ],
+                "additionalProperties": {
+                  "not": true,
+                  "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+                },
+                "description": "Configuration for static assets that are bundled with the application. Assets are served by the development server and included in the deployed app package. Supports file patterns, exclusions, and custom output paths for flexible asset management.",
+                "errorMessage": {
+                  "required": {
+                    "glob": "has to be a glob pattern",
+                    "output": "must be a relative path"
+                  }
+                }
+              },
+              "description": "Static asset configurations defining how files are copied and served. Each asset configuration handles different types of static resources."
+            }
+          },
+          "description": "UI-specific build configuration including asset management and plugin settings. Controls how frontend resources are processed and bundled. If optimize is enabled, Vite plugins from this configuration will be used for the main UI build, and ESBuild plugins will be used for widgets."
+        },
+        "api": {
+          "type": "object",
+          "properties": {
+            "plugins": {
+              "type": "array",
+              "description": "ESBuild plugins for customizing the build process"
+            }
+          },
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "description": "API-specific build configuration for backend processing and plugin integration. Manages server-side code compilation and plugin execution."
+        },
+        "dynatraceDependencies": {
+          "type": "object",
+          "properties": {
+            "addOrOverride": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Override specific Dynatrace dependencies with custom versions. Key is the dependency name, value is the semver-compliant version string."
+            },
+            "ignore": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "List of Dynatrace dependency names to exclude from the build."
+            }
+          },
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "description": "Advanced configuration for modifying Dynatrace platform dependencies. Allows overriding or ignoring specific platform dependencies during build."
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Configuration options for customizing the application build process. Controls compilation, bundling, asset processing, and output generation."
+    },
+    "Plugin": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "setup": {
+          "$comment": "(build: PluginBuild) => (void | Promise<void>)",
+          "type": "object",
+          "properties": {
+            "namedArgs": {
+              "type": "object",
+              "properties": {
+                "build": {
+                  "$ref": "#/definitions/PluginBuild"
+                }
+              },
+              "required": [
+                "build"
+              ],
+              "additionalProperties": {
+                "not": true,
+                "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "name",
+        "setup"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "PluginBuild": {
+      "type": "object",
+      "properties": {
+        "initialOptions": {
+          "$ref": "#/definitions/BuildOptions",
+          "description": "Documentation: https://esbuild.github.io/plugins/#build-options"
+        },
+        "esbuild": {
+          "type": "object",
+          "properties": {
+            "context": {
+              "$comment": "(options: SameShape<BuildOptions, T>) => Promise<BuildContext<T>>"
+            },
+            "build": {
+              "$comment": "(options: SameShape<BuildOptions, T>) => Promise<BuildResult<T>>"
+            },
+            "buildSync": {
+              "$comment": "(options: SameShape<BuildOptions, T>) => BuildResult<T>"
+            },
+            "transform": {
+              "$comment": "(input: string | Uint8Array, options?: SameShape<TransformOptions, T>) => Promise<TransformResult<T>>"
+            },
+            "transformSync": {
+              "$comment": "(input: string | Uint8Array, options?: SameShape<TransformOptions, T>) => TransformResult<T>"
+            },
+            "formatMessages": {
+              "$comment": "(messages: PartialMessage[], options: FormatMessagesOptions) => Promise<string[]>"
+            },
+            "formatMessagesSync": {
+              "$comment": "(messages: PartialMessage[], options: FormatMessagesOptions) => string[]"
+            },
+            "analyzeMetafile": {
+              "$comment": "(metafile: Metafile | string, options?: AnalyzeMetafileOptions) => Promise<string>"
+            },
+            "analyzeMetafileSync": {
+              "$comment": "(metafile: Metafile | string, options?: AnalyzeMetafileOptions) => string"
+            },
+            "initialize": {
+              "$comment": "(options: InitializeOptions) => Promise<void>"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "context",
+            "build",
+            "buildSync",
+            "transform",
+            "transformSync",
+            "formatMessages",
+            "formatMessagesSync",
+            "analyzeMetafile",
+            "analyzeMetafileSync",
+            "initialize",
+            "version"
+          ],
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          }
+        }
+      },
+      "required": [
+        "initialOptions",
+        "esbuild"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "BuildOptions": {
+      "type": "object",
+      "properties": {
+        "sourcemap": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "linked"
+            },
+            {
+              "type": "string",
+              "const": "inline"
+            },
+            {
+              "type": "string",
+              "const": "external"
+            },
+            {
+              "type": "string",
+              "const": "both"
+            }
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#sourcemap"
+        },
+        "legalComments": {
+          "type": "string",
+          "enum": [
+            "none",
+            "inline",
+            "eof",
+            "linked",
+            "external"
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#legal-comments"
+        },
+        "sourceRoot": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#source-root"
+        },
+        "sourcesContent": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#sources-content"
+        },
+        "format": {
+          "$ref": "#/definitions/Format",
+          "description": "Documentation: https://esbuild.github.io/api/#format"
+        },
+        "globalName": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#global-name"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#target"
+        },
+        "supported": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#supported"
+        },
+        "platform": {
+          "$ref": "#/definitions/Platform",
+          "description": "Documentation: https://esbuild.github.io/api/#platform"
+        },
+        "mangleProps": {
+          "type": "string",
+          "format": "regex",
+          "description": "Documentation: https://esbuild.github.io/api/#mangle-props"
+        },
+        "reserveProps": {
+          "type": "string",
+          "format": "regex",
+          "description": "Documentation: https://esbuild.github.io/api/#mangle-props"
+        },
+        "mangleQuoted": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#mangle-props"
+        },
+        "mangleCache": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean",
+                "const": false
+              }
+            ]
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#mangle-props"
+        },
+        "drop": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Drop"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#drop"
+        },
+        "dropLabels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#drop-labels"
+        },
+        "minify": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#minify"
+        },
+        "minifyWhitespace": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#minify"
+        },
+        "minifyIdentifiers": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#minify"
+        },
+        "minifySyntax": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#minify"
+        },
+        "lineLimit": {
+          "type": "number",
+          "description": "Documentation: https://esbuild.github.io/api/#line-limit"
+        },
+        "charset": {
+          "$ref": "#/definitions/Charset",
+          "description": "Documentation: https://esbuild.github.io/api/#charset"
+        },
+        "treeShaking": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#tree-shaking"
+        },
+        "ignoreAnnotations": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#ignore-annotations"
+        },
+        "jsx": {
+          "type": "string",
+          "enum": [
+            "transform",
+            "preserve",
+            "automatic"
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#jsx"
+        },
+        "jsxFactory": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#jsx-factory"
+        },
+        "jsxFragment": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#jsx-fragment"
+        },
+        "jsxImportSource": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#jsx-import-source"
+        },
+        "jsxDev": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#jsx-development"
+        },
+        "jsxSideEffects": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#jsx-side-effects"
+        },
+        "define": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#define"
+        },
+        "pure": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#pure"
+        },
+        "keepNames": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#keep-names"
+        },
+        "absPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AbsPaths"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#abs-paths"
+        },
+        "color": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#color"
+        },
+        "logLevel": {
+          "$ref": "#/definitions/LogLevel",
+          "description": "Documentation: https://esbuild.github.io/api/#log-level"
+        },
+        "logLimit": {
+          "type": "number",
+          "description": "Documentation: https://esbuild.github.io/api/#log-limit"
+        },
+        "logOverride": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/LogLevel"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#log-override"
+        },
+        "tsconfigRaw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/definitions/TsconfigRaw"
+            }
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#tsconfig-raw"
+        },
+        "bundle": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#bundle"
+        },
+        "splitting": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#splitting"
+        },
+        "preserveSymlinks": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#preserve-symlinks"
+        },
+        "outfile": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#outfile"
+        },
+        "metafile": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#metafile"
+        },
+        "outdir": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#outdir"
+        },
+        "outbase": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#outbase"
+        },
+        "external": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#external"
+        },
+        "packages": {
+          "type": "string",
+          "enum": [
+            "bundle",
+            "external"
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#packages"
+        },
+        "alias": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#alias"
+        },
+        "loader": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Loader"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#loader"
+        },
+        "resolveExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#resolve-extensions"
+        },
+        "mainFields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#main-fields"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#conditions"
+        },
+        "write": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#write"
+        },
+        "allowOverwrite": {
+          "type": "boolean",
+          "description": "Documentation: https://esbuild.github.io/api/#allow-overwrite"
+        },
+        "tsconfig": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#tsconfig"
+        },
+        "outExtension": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#out-extension"
+        },
+        "publicPath": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#public-path"
+        },
+        "entryNames": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#entry-names"
+        },
+        "chunkNames": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#chunk-names"
+        },
+        "assetNames": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#asset-names"
+        },
+        "inject": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#inject"
+        },
+        "banner": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#banner"
+        },
+        "footer": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#footer"
+        },
+        "entryPoints": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "in": {
+                        "type": "string"
+                      },
+                      "out": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "in",
+                      "out"
+                    ],
+                    "additionalProperties": {
+                      "not": true,
+                      "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Documentation: https://esbuild.github.io/api/#entry-points"
+        },
+        "stdin": {
+          "$ref": "#/definitions/StdinOptions",
+          "description": "Documentation: https://esbuild.github.io/api/#stdin"
+        },
+        "plugins": {
+          "type": "array",
+          "description": "ESBuild plugins for customizing the build process"
+        },
+        "absWorkingDir": {
+          "type": "string",
+          "description": "Documentation: https://esbuild.github.io/api/#working-directory"
+        },
+        "nodePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation: https://esbuild.github.io/api/#node-paths"
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "Format": {
+      "type": "string",
+      "enum": [
+        "iife",
+        "cjs",
+        "esm"
+      ]
+    },
+    "Platform": {
+      "type": "string",
+      "enum": [
+        "browser",
+        "node",
+        "neutral"
+      ]
+    },
+    "Drop": {
+      "type": "string",
+      "enum": [
+        "console",
+        "debugger"
+      ]
+    },
+    "Charset": {
+      "type": "string",
+      "enum": [
+        "ascii",
+        "utf8"
+      ]
+    },
+    "AbsPaths": {
+      "type": "string",
+      "enum": [
+        "code",
+        "log",
+        "metafile"
+      ]
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "verbose",
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "silent"
+      ]
+    },
+    "TsconfigRaw": {
+      "type": "object",
+      "properties": {
+        "compilerOptions": {
+          "type": "object",
+          "properties": {
+            "alwaysStrict": {
+              "type": "boolean"
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "experimentalDecorators": {
+              "type": "boolean"
+            },
+            "importsNotUsedAsValues": {
+              "type": "string",
+              "enum": [
+                "remove",
+                "preserve",
+                "error"
+              ]
+            },
+            "jsx": {
+              "type": "string",
+              "enum": [
+                "preserve",
+                "react-native",
+                "react",
+                "react-jsx",
+                "react-jsxdev"
+              ]
+            },
+            "jsxFactory": {
+              "type": "string"
+            },
+            "jsxFragmentFactory": {
+              "type": "string"
+            },
+            "jsxImportSource": {
+              "type": "string"
+            },
+            "paths": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "preserveValueImports": {
+              "type": "boolean"
+            },
+            "strict": {
+              "type": "boolean"
+            },
+            "target": {
+              "type": "string"
+            },
+            "useDefineForClassFields": {
+              "type": "boolean"
+            },
+            "verbatimModuleSyntax": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          }
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "Loader": {
+      "type": "string",
+      "enum": [
+        "base64",
+        "binary",
+        "copy",
+        "css",
+        "dataurl",
+        "default",
+        "empty",
+        "file",
+        "js",
+        "json",
+        "jsx",
+        "local-css",
+        "text",
+        "ts",
+        "tsx"
+      ]
+    },
+    "StdinOptions": {
+      "type": "object",
+      "properties": {
+        "contents": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "BYTES_PER_ELEMENT": {
+                  "type": "number"
+                },
+                "buffer": {
+                  "type": "object",
+                  "properties": {
+                    "byteLength": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "byteLength"
+                  ],
+                  "additionalProperties": {
+                    "not": true,
+                    "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+                  }
+                },
+                "byteLength": {
+                  "type": "number"
+                },
+                "byteOffset": {
+                  "type": "number"
+                },
+                "length": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "BYTES_PER_ELEMENT",
+                "buffer",
+                "byteLength",
+                "byteOffset",
+                "length"
+              ],
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          ]
+        },
+        "resolveDir": {
+          "type": "string"
+        },
+        "sourcefile": {
+          "type": "string"
+        },
+        "loader": {
+          "$ref": "#/definitions/Loader"
+        }
+      },
+      "required": [
+        "contents"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "AppOptions": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The unique identifier of the app. Limited to 50 characters. Must be an alphanumeric string containing only lowercase characters.",
+          "pattern": "^[a-z0-9]+(\\.[a-z0-9]+)*$",
+          "maxLength": 50
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the app. Limited to 40 characters.",
+          "maxLength": 40
+        },
+        "version": {
+          "type": "string",
+          "description": "The version of the app."
+        },
+        "description": {
+          "type": "string",
+          "description": "The description of the app. Limited to 80 characters.",
+          "maxLength": 80
+        },
+        "documentTypes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Human-readable name for the document type displayed in the Dynatrace interface. Used in file browsers, document listings, and type selection dialogs."
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": {
+              "not": true,
+              "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+            }
+          },
+          "description": "Document type definitions for apps that handle custom document formats. Defines how the app processes and displays specific document types. Is relative to the sourceRoot."
+        },
+        "icon": {
+          "type": "string",
+          "description": "Path to the app icon, can either be a .svg (recommended) or .png file. An icon will be auto-generated if no icon path is set.",
+          "format": "relative-path",
+          "errorMessage": "must be a relative path"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Hides the listing in the App Launcher. Useful for widget apps."
+        },
+        "intents": {
+          "$ref": "#/definitions/IntentsDeclarations",
+          "description": "The list of app capabilities of handling the intents. Use `IntentDeclaration` from `@dynatrace-sdk/navigation` for authoring intent declarations.",
+          "deprecated": true
+        },
+        "pageTokens": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The list of page tokens exposed by the app."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Action"
+          },
+          "description": "Workflow automation actions provided by the app. Workflow automation actions are automatically deployed with the app when detected on the filesystem, regardless of whether they are explicitly configured here. Enables integration with Dynatrace automation workflows and external systems. Is relative to the sourceRoot."
+        },
+        "csp": {
+          "$ref": "#/definitions/CSPAppDirectives",
+          "description": "Content Security Policy directives specific to this application. Defines allowed sources for fonts, images, scripts, and other resources."
+        },
+        "functionSandbox": {
+          "$ref": "#/definitions/FunctionSandbox",
+          "description": "Defines special sandbox options that enable additional capabilities for functions"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The OAuth scope identifier as defined by Dynatrace API documentation. Corresponds to specific API endpoints or data access permissions."
+              },
+              "comment": {
+                "type": "string",
+                "description": "Explanation of why this scope is required by the application. Used for permission reviews and compliance documentation."
+              }
+            },
+            "required": [
+              "name",
+              "comment"
+            ],
+            "additionalProperties": {
+              "not": true,
+              "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+            },
+            "description": "OAuth 2.0 scope definition for Dynatrace API access permissions. Defines specific API capabilities required by the application with justification."
+          },
+          "description": "The list of scopes required by the app."
+        },
+        "selfMonitoringAgent": {
+          "type": "string",
+          "description": "The self monitoring agent url"
+        },
+        "uiCommands": {
+          "type": "object",
+          "properties": {
+            "categories": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/UICommandCategory"
+              }
+            }
+          },
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "description": "UI command definitions for extending Dynatrace interface functionality. Allows apps to contribute commands to menus, toolbars, and context actions."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name for the settings widget shown in the configuration interface."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional description explaining the purpose and impact of these settings."
+              },
+              "schemaIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Array of JSON schema identifiers that define the structure and validation rules for the configuration data managed by this settings widget."
+              }
+            },
+            "required": [
+              "name",
+              "schemaIds"
+            ],
+            "additionalProperties": {
+              "not": true,
+              "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+            }
+          },
+          "description": "Configuration widgets for app-specific settings management. Settings widgets are automatically deployed with the app when detected on the filesystem, regardless of whether they are explicitly configured here. Provides structured forms for users to configure app behavior and preferences. Is relative to the sourceRoot."
+        },
+        "documents": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Optional display name for the document handler in the Dynatrace interface."
+              },
+              "description": {
+                "type": "string",
+                "description": "Optional description of the document type and its processing capabilities."
+              }
+            },
+            "additionalProperties": {
+              "not": true,
+              "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+            }
+          },
+          "description": "Documents handling configuration for apps that process custom document types. Defines document schemas, rendering, and interaction capabilities. Is relative to the sourceRoot."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "description",
+        "scopes"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Core application metadata and configuration options used to generate the Dynatrace app manifest. Defines the app's identity, capabilities, security requirements, and integration features."
+    },
+    "IntentsDeclarations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "properties": {
+            "$ref": "#/definitions/IntentDeclarationProperties%3C(BuiltinTypes%7Cstring)%3E"
+          },
+          "deprecated": {
+            "type": "boolean"
+          },
+          "addonMode": {
+            "type": "string",
+            "const": "overlay",
+            "description": "Opens the addon as an overlay on top of the current view."
+          },
+          "addonConfig": {
+            "$ref": "#/definitions/AddonConfig",
+            "description": "Visual configuration for the overlay."
+          },
+          "responseProperties": {
+            "$ref": "#/definitions/IntentDeclarationProperties%3Cany%3E",
+            "description": "Properties returned by the addon to the source."
+          }
+        }
+      },
+      "description": "App intent declarations, keyed by intent id.\n\nEach declaration is the `IntentDeclaration` from `@dynatrace-sdk/navigation` widened with an open index signature. The platform backend still accepts declaration properties that are not (yet) part of the typed `IntentDeclaration` — for example `visualMode` or `modalContentHeight` — so the index signature lets app teams keep authoring those without a type error until they migrate to the current intent declaration structure.\n\nThe open index signature is a temporary compatibility shim. It should be removed once app teams have migrated to the typed `IntentDeclaration` structure exposed by `@dynatrace-sdk/navigation`. The accompanying `@deprecated` notice lives on the `intents` option so it surfaces on hover in app configs."
+    },
+    "AddonConfig": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "properties": {
+            "size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "small",
+                            "medium",
+                            "large"
+                          ],
+                          "description": "Preset size values for an addon overlay."
+                        },
+                        {
+                          "type": "string",
+                          "const": "auto"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    "width": {
+                      "type": "string",
+                      "enum": [
+                        "small",
+                        "medium",
+                        "large"
+                      ],
+                      "description": "Preset size values for an addon overlay."
+                    }
+                  },
+                  "additionalProperties": {
+                    "not": true,
+                    "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+                  },
+                  "description": "Object form of addon size configuration, allowing separate control of width and height."
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "small",
+                    "medium",
+                    "large"
+                  ],
+                  "description": "Preset size values for an addon overlay."
+                },
+                {
+                  "type": "string",
+                  "const": "maximized"
+                }
+              ],
+              "description": "Size configuration for an addon overlay."
+            },
+            "headless": {
+              "type": "boolean",
+              "const": true,
+              "description": "When `true`, the addon is rendered without a title bar."
+            }
+          },
+          "required": [
+            "headless"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "properties": {
+            "size": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "height": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "small",
+                            "medium",
+                            "large"
+                          ],
+                          "description": "Preset size values for an addon overlay."
+                        },
+                        {
+                          "type": "string",
+                          "const": "auto"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    "width": {
+                      "type": "string",
+                      "enum": [
+                        "small",
+                        "medium",
+                        "large"
+                      ],
+                      "description": "Preset size values for an addon overlay."
+                    }
+                  },
+                  "additionalProperties": {
+                    "not": true,
+                    "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+                  },
+                  "description": "Object form of addon size configuration, allowing separate control of width and height."
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "small",
+                    "medium",
+                    "large"
+                  ],
+                  "description": "Preset size values for an addon overlay."
+                },
+                {
+                  "type": "string",
+                  "const": "maximized"
+                }
+              ],
+              "description": "Size configuration for an addon overlay."
+            },
+            "headless": {
+              "type": "boolean",
+              "const": false
+            },
+            "title": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "description": "Visual configuration options for an addon overlay."
+    },
+    "IntentDeclarationProperties<any>": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/IntentPropertyDeclaration%3Cany%3E"
+      }
+    },
+    "IntentPropertyDeclaration<any>": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/IntentPropertyDeclarationWithSchema"
+        },
+        {
+          "$ref": "#/definitions/IntentPropertyDeclarationWithSchemas%3Cany%3E"
+        }
+      ]
+    },
+    "IntentPropertyDeclarationWithSchema": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "type": {}
+          }
+        }
+      }
+    },
+    "IntentPropertyDeclarationWithSchemas<any>": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "schemas": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {}
+            }
+          }
+        }
+      }
+    },
+    "IntentDeclarationProperties<(BuiltinTypes|string)>": {
+      "type": "object",
+      "properties": {
+        "dt.query": {
+          "$ref": "#/definitions/IntentPropertyDeclaration%3C(BuiltinTypes%7Cstring)%3E"
+        },
+        "dt.timeframe": {
+          "$ref": "#/definitions/IntentPropertyDeclaration%3C(BuiltinTypes%7Cstring)%3E"
+        },
+        "dt.entity.host": {
+          "$ref": "#/definitions/IntentPropertyDeclaration%3C(BuiltinTypes%7Cstring)%3E"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/IntentPropertyDeclaration%3C(BuiltinTypes%7Cstring)%3E"
+      }
+    },
+    "IntentPropertyDeclaration<(BuiltinTypes|string)>": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/IntentPropertyDeclarationWithSchema"
+        },
+        {
+          "$ref": "#/definitions/IntentPropertyDeclarationWithSchemas%3C(BuiltinTypes%7Cstring)%3E"
+        }
+      ]
+    },
+    "IntentPropertyDeclarationWithSchemas<(BuiltinTypes|string)>": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "schemas": {
+          "type": "object",
+          "properties": {
+            "dt.query": {
+              "type": "object",
+              "properties": {
+                "type": {}
+              }
+            },
+            "dt.timeframe": {
+              "type": "object",
+              "properties": {
+                "type": {}
+              }
+            },
+            "dt.entity.host": {
+              "type": "object",
+              "properties": {
+                "type": {}
+              }
+            }
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {}
+            }
+          }
+        }
+      }
+    },
+    "Action": {
+      "type": "object",
+      "additionalProperties": {
+        "deprecated": true
+      },
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Human-readable title displayed in workflow editors and action catalogs. Should be concise and descriptive of the action's primary function."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description explaining the action's purpose, inputs, and behavior. Used in documentation and workflow design interfaces."
+        },
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for the action within the application scope. Used for action registration, invocation, and workflow references."
+        },
+        "stateful": {
+          "type": "boolean",
+          "description": "Legacy flag indicating whether the action maintains state between executions.",
+          "deprecated": true
+        },
+        "build": {
+          "type": "object",
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          },
+          "properties": {
+            "plugins": {
+              "type": "array",
+              "description": "ESBuild plugins for customizing the build process"
+            },
+            "entryPoint": {
+              "type": "string",
+              "description": "Main TypeScript/React entry file for the action's user interface. Path is relative to the action's directory (`/widgets/actions/<name>`). This file typically exports the action's main React component.",
+              "default": "src/main.tsx"
+            },
+            "tsconfig": {
+              "type": "string",
+              "description": "TypeScript configuration file for compiling the action's code. Path is relative to the action's directory (`/widgets/actions/<name>`). Should contain action-specific compiler options and path mappings.",
+              "default": "tsconfig.json"
+            }
+          },
+          "description": "Build configuration specific to this action's UI components and compilation.",
+          "deprecated": true
+        }
+      },
+      "required": [
+        "description",
+        "name",
+        "title"
+      ]
+    },
+    "CSPAppDirectives": {
+      "type": "object",
+      "properties": {
+        "font-src": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectiveValue"
+          },
+          "description": "The font-src directive specifies valid sources for fonts loaded."
+        },
+        "img-src": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectiveValue"
+          },
+          "description": "The img-src directive specifies valid sources of images and favicons."
+        },
+        "media-src": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectiveValue"
+          },
+          "description": "The media-src directive specifies valid sources for loading media."
+        },
+        "style-src": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectiveValue"
+          },
+          "description": "The style-src directive specifies valid sources for stylesheets."
+        },
+        "script-src": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DirectiveValue"
+          },
+          "description": "The script-src directive specifies valid sources for JavaScript. This includes not only URLs loaded directly into script elements, but also things like inline script event handlers (onclick) and XSLT stylesheets which can trigger script execution."
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Content Security Policy (CSP) directives configuration for enhanced application security. Defines trusted sources for various types of resources to prevent XSS and data injection attacks. Each directive type corresponds to a specific CSP header directive."
+    },
+    "DirectiveValue": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "The CSP directive value (e.g., URL, keyword like 'self', 'unsafe-inline'). Must follow CSP specification syntax for the corresponding directive type."
+        },
+        "comment": {
+          "type": "string",
+          "description": "Human-readable explanation for why this directive value is necessary. Required for security audits and compliance documentation."
+        }
+      },
+      "required": [
+        "value",
+        "comment"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Individual CSP directive value with documentation for security compliance. Combines the actual directive value with explanatory context for security audits."
+    },
+    "FunctionSandbox": {
+      "type": "object",
+      "properties": {
+        "unsafe-eval": {
+          "$ref": "#/definitions/UnsafeEval",
+          "description": "Explicitly allows the app to use JavaScript features that evaluate code from strings at runtime (like eval()). This opens up the risk of remote-code execution (RCE) from untrusted input."
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Defines special sandbox options that enable additional capabilities for functions"
+    },
+    "UnsafeEval": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "boolean",
+          "description": "Enables/disables the usage of the eval() JavaScript function in the scope of a dynatrace app function."
+        },
+        "comment": {
+          "type": "string",
+          "description": "Additional comment to specify why the eval() function is being used."
+        }
+      },
+      "required": [
+        "value",
+        "comment"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Explicitly allows the app to use JavaScript features that evaluate code from strings at runtime (like eval()). This opens up the risk of remote-code execution (RCE) from untrusted input."
+    },
+    "UICommandCategory": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UICommand"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "commands"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "UICommand": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "keyBindings": {
+          "$ref": "#/definitions/UICommandKeyBindings",
+          "description": "When not given, command is Informational only"
+        }
+      },
+      "required": [
+        "id",
+        "description"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      }
+    },
+    "UICommandKeyBindings": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "windows": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "macos": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "other": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": {
+            "not": true,
+            "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+          }
+        }
+      ]
+    },
+    "ServerOptions": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "number",
+          "description": "Port where the app should be served.",
+          "default": 3000
+        },
+        "host": {
+          "type": "string",
+          "description": "The host IP to bind the dev server on.",
+          "default": "127.0.0.1"
+        },
+        "showWarnings": {
+          "type": "boolean",
+          "description": "Whether build warnings should be displayed in the dev server or not.",
+          "default": false
+        },
+        "enableCSP": {
+          "type": "boolean",
+          "description": "Whether the dev server should add CSP headers to all requests. If `true`, the dev server will generate a set of default CSP Directives and add the custom CSP Directives to this set if specified. In local development, `frame-src` and `frame-ancestors` are always set to *",
+          "default": true
+        },
+        "https": {
+          "$ref": "#/definitions/ServerHttpsOptions",
+          "description": "SSL/TLS certificate configuration for HTTPS development server. Provides secure local development environment with custom certificates."
+        }
+      },
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "Configuration options for the local development server. Controls how the application is served during development including network settings, security policies, and SSL configuration."
+    },
+    "ServerHttpsOptions": {
+      "type": "object",
+      "properties": {
+        "cert": {
+          "type": "string",
+          "description": "Path to SSL certificate in PEM format"
+        },
+        "key": {
+          "type": "string",
+          "description": "Path to private key in PEM format"
+        }
+      },
+      "required": [
+        "cert",
+        "key"
+      ],
+      "additionalProperties": {
+        "not": true,
+        "errorMessage": "contains unknown property ${0#}. Please check if there is a typo or remove it"
+      },
+      "description": "HTTPS configuration options for the development server."
+    }
+  }
+}

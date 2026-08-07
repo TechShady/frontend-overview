@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.dt-app/cache/
+.dt-app/deploy.log
+.dt-app/logs/
+.dt-app/.tokens.json
+*.log
+.DS_Store

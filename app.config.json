@@ -1,0 +1,25 @@
+{
+  "$schema": "./.dt-app/app.config.schema.json",
+  "environmentUrl": "https://guu84124.apps.dynatrace.com",
+  "app": {
+    "name": "Frontend Overview",
+    "version": "0.1.1",
+    "description": "Compare and contrast all web apps in the tenant.",
+    "id": "my.frontend.overview.app",
+    "icon": "./assets/icon.png",
+    "scopes": [
+      { "name": "storage:events:read", "comment": "read events" },
+      { "name": "storage:user.events:read", "comment": "read RUM user events" },
+      { "name": "storage:user.sessions:read", "comment": "read RUM sessions" },
+      { "name": "storage:metrics:read", "comment": "read metrics (web vitals timeseries)" },
+      { "name": "storage:entities:read", "comment": "read entity data (dt.entity.application etc.)" },
+      { "name": "storage:buckets:read", "comment": "read named buckets (dt.davis.problems)" },
+      { "name": "storage:spans:read", "comment": "read distributed traces" },
+      { "name": "state:user-app-states:read", "comment": "read user settings" },
+      { "name": "state:user-app-states:write", "comment": "save user settings" },
+      { "name": "state:app-states:read", "comment": "read shared app settings" },
+      { "name": "state:app-states:write", "comment": "save shared app settings" }
+    ],
+    "functionSandbox": {}
+  }
+}
