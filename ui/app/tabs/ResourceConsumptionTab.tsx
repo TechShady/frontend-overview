@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { resourceConsumptionQuery, thirdPartyImpactQuery } from "../queries";
+import { resourceConsumptionQuery, thirdPartyImpactQuery, webAppBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Resource Consumption — the "who's eating the most bytes / requests" tab.
@@ -15,6 +16,7 @@ export const ResourceConsumptionTab: React.FC = () => {
   const sel = webAppFilter.selected;
   const consumption = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const thirdParty = useDql(thirdPartyImpactQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const rows = useMemo(() =>
     (consumption.data?.records ?? []).map((r: any) => ({
@@ -105,6 +107,41 @@ export const ResourceConsumptionTab: React.FC = () => {
       } },
   ], [maxTpBytes]);
 
+  // Bucketed movement data (proxies from bucketed metrics: sessions/actions).
+  const { bucketValuesBySort: appBucket } = useBucketedRanks({
+    records: (bucketed.data?.records ?? []) as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["sessions", "actions"],
+  });
+  const consumptionBucketBySort = useMemo(() => ({
+    totalBytes: appBucket.sessions ?? {},
+    totalRequests: appBucket.actions ?? {},
+    pageViews: appBucket.sessions ?? {},
+    avgBytesPerView: appBucket.sessions ?? {},
+    avgRequestsPerView: appBucket.actions ?? {},
+    avgDomComplete: appBucket.actions ?? {},
+  }), [appBucket]);
+  const consumptionSortOptions: TLSortOption<typeof rows[number]>[] = useMemo(() => [
+    { value: "totalBytes",         label: "Total bytes",           get: (r) => Number(r.totalBytes),         higherIsBetter: false },
+    { value: "totalRequests",      label: "Total requests",        get: (r) => Number(r.totalRequests),      higherIsBetter: false },
+    { value: "pageViews",          label: "Page views",            get: (r) => Number(r.pageViews),          higherIsBetter: true },
+    { value: "avgBytesPerView",    label: "Bytes / page",          get: (r) => Number(r.avgBytesPerView),    higherIsBetter: false },
+    { value: "avgRequestsPerView", label: "Requests / page",       get: (r) => Number(r.avgRequestsPerView), higherIsBetter: false },
+    { value: "avgDomComplete",     label: "DOM Complete",          get: (r) => Number(r.avgDomComplete),     higherIsBetter: false },
+  ], []);
+
+  const tpBucketBySort = useMemo(() => ({
+    thirdPartyBytes: appBucket.sessions ?? {},
+    thirdPartyRequests: appBucket.actions ?? {},
+    thirdPartyBytesPct: appBucket.sessions ?? {},
+  }), [appBucket]);
+  const tpSortOptions: TLSortOption<typeof tpRows[number]>[] = useMemo(() => [
+    { value: "thirdPartyBytes",    label: "3rd-party bytes",     get: (r) => Number(r.thirdPartyBytes),    higherIsBetter: false },
+    { value: "thirdPartyRequests", label: "3rd-party requests",  get: (r) => Number(r.thirdPartyRequests), higherIsBetter: false },
+    { value: "thirdPartyBytesPct", label: "% of total bytes",    get: (r) => Number(r.thirdPartyBytesPct), higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -121,7 +158,15 @@ export const ResourceConsumptionTab: React.FC = () => {
         subtitle="Which web apps are consuming the most bandwidth and making the most network requests? Sort by any column to find the biggest offenders."
       >
         {consumption.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={consumption.error} label="No resource data captured. RUM enrichment for `networkBytes` / `networkRequests` may be off." /> : (
-          <DataTable data={rows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={rows}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={consumptionSortOptions}
+            defaultSort="totalBytes"
+            bucketValuesBySort={consumptionBucketBySort}
+          />
         )}
       </SectionCard>
 
@@ -130,7 +175,15 @@ export const ResourceConsumptionTab: React.FC = () => {
         subtitle="How much of each web app's payload is 3rd-party (ads, analytics, tag managers, chat widgets)? High % usually means slow, unpredictable performance."
       >
         {thirdParty.loading ? <EmptyState loading /> : tpRows.length === 0 ? <EmptyState error={thirdParty.error} label="No third-party fields present in RUM." /> : (
-          <DataTable data={tpRows} columns={tpCols} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={tpRows}
+            columns={tpCols}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={tpSortOptions}
+            defaultSort="thirdPartyBytes"
+            bucketValuesBySort={tpBucketBySort}
+          />
         )}
       </SectionCard>
     </div>

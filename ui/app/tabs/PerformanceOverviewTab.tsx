@@ -2,11 +2,13 @@ import React, { useMemo } from "react";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webAppSummaryQuery, webVitalsPerAppQuery } from "../queries";
+import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
 import { computeAppScore, computeFleetScore, PerAppSummary, PerAppVitals } from "../scoring";
 import { KpiCard } from "../components/KpiCard";
 import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Performance Overview
@@ -41,6 +43,7 @@ export const PerformanceOverviewTab: React.FC = () => {
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const summaries: EnrichedSummary[] = useMemo(() => {
     return (sum.data?.records ?? []).map((r: any) => ({
@@ -290,6 +293,41 @@ export const PerformanceOverviewTab: React.FC = () => {
 
   const loading = sum.loading || vitals.loading;
 
+  // ---------------------------------------------------------------------
+  // Bucketed metrics → Movement column
+  // ---------------------------------------------------------------------
+  const bucketedRecords = bucketed.data?.records ?? [];
+  const { bucketValuesBySort } = useBucketedRanks({
+    records: bucketedRecords as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["sessions", "users", "actions", "errors", "errorRate", "avgDuration", "apdex", "lcp", "inp", "cls", "ttfb", "loadEnd"],
+  });
+
+  // Sort → metric mapping. "grade" reuses "apdex" bucket data as a proxy since
+  // grade is a composite score not computed per-bucket.
+  const sortOptions: TLSortOption<typeof tableRows[number]>[] = useMemo(() => [
+    { value: "grade",       label: "Grade",       get: (r) => Number(r.grade),       higherIsBetter: true },
+    { value: "sessions",    label: "Sessions",    get: (r) => Number(r.sessions),    higherIsBetter: true },
+    { value: "users",       label: "Users",       get: (r) => Number(r.users),       higherIsBetter: true },
+    { value: "actions",     label: "Actions",     get: (r) => Number(r.actions),     higherIsBetter: true },
+    { value: "errorRate",   label: "Error rate",  get: (r) => Number(r.errorRate),   higherIsBetter: false },
+    { value: "avgDuration", label: "Duration",    get: (r) => Number(r.avgDuration), higherIsBetter: false },
+    { value: "apdex",       label: "Apdex",       get: (r) => Number(r.apdex),       higherIsBetter: true },
+    { value: "lcp",         label: "LCP",         get: (r) => Number(r.lcp),         higherIsBetter: false },
+    { value: "inp",         label: "INP",         get: (r) => Number(r.inp),         higherIsBetter: false },
+    { value: "cls",         label: "CLS",         get: (r) => Number(r.cls),         higherIsBetter: false },
+    { value: "ttfb",        label: "TTFB",        get: (r) => Number(r.ttfb),        higherIsBetter: false },
+    { value: "loadEnd",     label: "Load event end", get: (r) => Number(r.loadEnd),  higherIsBetter: false },
+  ], []);
+
+  // Alias "grade" → "apdex" bucketing (grade isn't computed per bucket).
+  const bucketBySort = useMemo(() => {
+    const out: Record<string, Record<string, (number | null)[]>> = { ...bucketValuesBySort };
+    if (bucketValuesBySort.apdex) out.grade = bucketValuesBySort.apdex;
+    return out;
+  }, [bucketValuesBySort]);
+
   return (
     <div>
       {/* Fleet grade + primary KPI row */}
@@ -338,7 +376,15 @@ export const PerformanceOverviewTab: React.FC = () => {
         subtitle={`Every RUM app broken down by grade, traffic, error rate, duration, Apdex, and all Core Web Vitals. ${scoredRows.length} apps evaluated.`}
       >
         {loading ? <EmptyState loading /> : tableRows.length === 0 ? <EmptyState /> : (
-          <DataTable data={tableRows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={tableRows}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={sortOptions}
+            defaultSort="sessions"
+            bucketValuesBySort={bucketBySort}
+          />
         )}
       </SectionCard>
 

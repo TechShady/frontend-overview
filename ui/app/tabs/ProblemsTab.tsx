@@ -1,10 +1,10 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { problemsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 
 // ---------------------------------------------------------------------------
 // Problems tab — Davis problems currently affecting web-app services.
@@ -60,6 +60,12 @@ export const ProblemsTab: React.FC = () => {
       ) },
   ], []);
 
+  const sortOptions: TLSortOption<typeof rows[number]>[] = useMemo(() => [
+    { value: "start",      label: "Most recent", get: (r) => Number(r.start),      higherIsBetter: true },
+    { value: "durationMs", label: "Duration",    get: (r) => Number(r.durationMs), higherIsBetter: false },
+    { value: "category",   label: "Category",    get: (r) => (r.category === "AVAILABILITY" ? 3 : r.category === "ERROR" ? 2 : r.category === "SLOWDOWN" ? 1 : 0), higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -72,7 +78,14 @@ export const ProblemsTab: React.FC = () => {
 
       <SectionCard title="Davis problems affecting web apps">
         {prob.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={prob.error} label="No matching problems." /> : (
-          <DataTable data={rows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={rows}
+            columns={columns}
+            rowKey={(r: any) => String(r.id)}
+            firstColumnField="id"
+            sortOptions={sortOptions}
+            defaultSort="start"
+          />
         )}
       </SectionCard>
     </div>

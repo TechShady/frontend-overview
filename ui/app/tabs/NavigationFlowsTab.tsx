@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { topPagesQuery, pageTransitionsQuery } from "../queries";
+import { topPagesQuery, pageTransitionsQuery, pagesBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Navigation & Flows — top pages + page-to-page transitions per web app.
@@ -15,6 +16,7 @@ export const NavigationFlowsTab: React.FC = () => {
   const sel = webAppFilter.selected;
   const pages = useDql(topPagesQuery(timeframeDays, sel), [timeframeDays, sel]);
   const transitions = useDql(pageTransitionsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const pageBucketed = useDql(pagesBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
   const [minTransitions, setMinTransitions] = useState(5);
 
   const pageRows = useMemo(() =>
@@ -83,6 +85,33 @@ export const NavigationFlowsTab: React.FC = () => {
       cell: ({ value }: any) => <InlineBar value={Number(value)} max={maxTrans} color="#A56EFF" /> },
   ], [maxTrans]);
 
+  // Bucketed page metrics — key by "app::page" to match pageRows.
+  const { bucketValuesBySort: pageBucket } = useBucketedRanks({
+    records: (pageBucketed.data?.records ?? []) as any[],
+    rowKeyField: "page",
+    bucketField: "bkt",
+    metricFields: ["views", "sessions", "errors", "avgDuration"],
+  });
+  const pageBucketBySort = useMemo(() => {
+    const remap = (src: Record<string, (number | null)[]>) => {
+      const out: Record<string, (number | null)[]> = {};
+      for (const r of pageRows) out[`${r.application}::${r.name}`] = src[r.name] ?? [];
+      return out;
+    };
+    return {
+      views:       remap(pageBucket.views ?? {}),
+      avgDuration: remap(pageBucket.avgDuration ?? {}),
+      errors:      remap(pageBucket.errors ?? {}),
+      errRate:     remap(pageBucket.errors ?? {}),
+    };
+  }, [pageBucket, pageRows]);
+  const pageSortOptions: TLSortOption<typeof pageRows[number]>[] = useMemo(() => [
+    { value: "views",       label: "Views",        get: (r) => Number(r.views),       higherIsBetter: true },
+    { value: "avgDuration", label: "Avg duration", get: (r) => Number(r.avgDuration), higherIsBetter: false },
+    { value: "errors",      label: "Errors",       get: (r) => Number(r.errors),      higherIsBetter: false },
+    { value: "errRate",     label: "Err %",        get: (r) => Number(r.errRate),     higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -93,7 +122,15 @@ export const NavigationFlowsTab: React.FC = () => {
 
       <SectionCard title="Top pages per Web App" subtitle="Ranked by page views. Duration and error rate are per-page.">
         {pages.loading ? <EmptyState loading /> : pageRows.length === 0 ? <EmptyState error={pages.error} /> : (
-          <DataTable data={pageRows} columns={pageCols} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={pageRows}
+            columns={pageCols}
+            rowKey={(r: any) => `${r.application}::${r.name}`}
+            firstColumnField="application"
+            sortOptions={pageSortOptions}
+            defaultSort="views"
+            bucketValuesBySort={pageBucketBySort}
+          />
         )}
       </SectionCard>
 
@@ -110,7 +147,14 @@ export const NavigationFlowsTab: React.FC = () => {
         }
       >
         {transitions.loading ? <EmptyState loading /> : transitionRows.length === 0 ? <EmptyState error={transitions.error} /> : (
-          <DataTable data={transitionRows} columns={transCols} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={transitionRows}
+            columns={transCols}
+            rowKey={(r: any) => `${r.application}::${r.from}->${r.to}`}
+            firstColumnField="application"
+            sortOptions={[{ value: "transitions", label: "Transitions", get: (r) => Number(r.transitions), higherIsBetter: true }]}
+            defaultSort="transitions"
+          />
         )}
       </SectionCard>
     </div>

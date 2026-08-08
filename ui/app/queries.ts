@@ -327,3 +327,130 @@ export function problemsQuery(days: number, selected: string | null): string {
     | limit 500
   `;
 }
+
+// ---------------------------------------------------------------------------
+// Bucketed per-app metrics — powers the Movement column in TimelapseTable.
+// Chooses a bucket size so ~8 buckets span the timeframe. Returns one row per
+// (application, bkt) with all sortable metrics.
+// ---------------------------------------------------------------------------
+export function bucketSizeForDays(days: number): { label: string; ms: number; count: number } {
+  const totalHours = days * 24;
+  // aim for 8-12 buckets
+  const targetHours = Math.max(1, Math.floor(totalHours / 8));
+  // snap to friendly sizes
+  const choices = [1, 2, 3, 6, 12, 24, 48, 72, 168];
+  const pick = choices.find((c) => c >= targetHours) ?? choices[choices.length - 1];
+  return {
+    label: `${pick}h`,
+    ms: pick * 3600 * 1000,
+    count: Math.max(1, Math.ceil(totalHours / pick)),
+  };
+}
+
+export function webAppBucketedMetricsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const { label } = bucketSizeForDays(days);
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
+        bkt = bin(timestamp, ${label})
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        users = countDistinct(dt.rum.session.id),
+        actions = countIf(isAction),
+        errors = countIf(characteristics.has_error == true),
+        avgDuration = avg(if(isAction, dur_ms)),
+        satisfied = countIf(isAction and dur_ms <= 3000),
+        tolerating = countIf(isAction and dur_ms > 3000 and dur_ms <= 12000),
+        frustrated = countIf(isAction and dur_ms > 12000),
+        lcp = avg(toDouble(web_vitals.largest_contentful_paint) / 1000000.0),
+        inp = avg(toDouble(web_vitals.interaction_to_next_paint) / 1000000.0),
+        cls = avg(toDouble(web_vitals.cumulative_layout_shift)),
+        ttfb = avg(toDouble(web_vitals.time_to_first_byte) / 1000000.0),
+        loadEnd = avg(toDouble(performance.load_event_end) / 1000000.0),
+        by:{application = frontend.name, bkt}
+    | fieldsAdd
+        errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100,
+        apdex = (toDouble(satisfied) + toDouble(tolerating) * 0.5) / (toDouble(satisfied + tolerating + frustrated) + 0.0001)
+    | sort application asc, bkt asc
+    | limit 5000
+  `;
+}
+
+// Same shape but keyed by page/view — for NavigationFlows Top Pages table.
+export function pagesBucketedMetricsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const { label } = bucketSizeForDays(days);
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(view.url_path)${filt}
+    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | summarize
+        views = count(),
+        sessions = countDistinct(dt.rum.session.id),
+        errors = countIf(characteristics.has_error == true),
+        avgDuration = avg(dur_ms),
+        by:{page = view.url_path, bkt}
+    | sort views desc
+    | limit 5000
+  `;
+}
+
+// Bucketed geo — per country per bucket.
+export function geoBucketedMetricsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const { label } = bucketSizeForDays(days);
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
+    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        actions = count(),
+        errors = countIf(characteristics.has_error == true),
+        avgDuration = avg(dur_ms),
+        by:{country = geo.country.iso_code, bkt}
+    | sort sessions desc
+    | limit 5000
+  `;
+}
+
+// Bucketed device breakdown.
+export function deviceBucketedMetricsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const { label } = bucketSizeForDays(days);
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(device.type)${filt}
+    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        actions = count(),
+        errors = countIf(characteristics.has_error == true),
+        avgDuration = avg(dur_ms),
+        by:{device = device.type, bkt}
+    | sort sessions desc
+    | limit 5000
+  `;
+}
+
+// Bucketed error types — per (application, errorType).
+export function errorsBucketedMetricsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const { label } = bucketSizeForDays(days);
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and characteristics.has_error == true${filt}
+    | fieldsAdd bkt = bin(timestamp, ${label})
+    | summarize
+        errors = count(),
+        affectedSessions = countDistinct(dt.rum.session.id),
+        by:{errorMessage = coalesce(error.type, characteristics.classifier, "Unknown"), bkt}
+    | sort errors desc
+    | limit 5000
+  `;
+}
+

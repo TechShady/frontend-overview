@@ -22,11 +22,15 @@ export const TL_BUCKET_MS: Record<TlBucket, number> = {
 };
 
 export const TL_SPEEDS: { value: number; label: string }[] = [
+  { value: 4000, label: "0.25x" },
   { value: 2000, label: "0.5x" },
   { value: 1200, label: "1x" },
   { value: 700, label: "2x" },
   { value: 400, label: "4x" },
 ];
+
+// Table-first default: slow playback so rank movement is legible.
+export const TL_TABLE_DEFAULT_SPEED_MS = 4000;
 
 export interface SharedBucketMetrics {
   bucket: string;
@@ -79,7 +83,7 @@ export function useTimelapse(): TimelapseState {
 export const TimelapseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [enabled, setEnabled] = useState(false);
   const [bucket, setBucket] = useState<TlBucket>("1h");
-  const [speedMs, setSpeedMs] = useState(1200);
+  const [speedMs, setSpeedMs] = useState(TL_TABLE_DEFAULT_SPEED_MS);
   const [playing, setPlaying] = useState(false);
   const [index, setIndex] = useState(0);
   const [totalBuckets, setTotalBuckets] = useState(0);

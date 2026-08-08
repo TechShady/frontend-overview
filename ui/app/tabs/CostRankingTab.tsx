@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { resourceConsumptionQuery, webAppSummaryQuery } from "../queries";
+import { resourceConsumptionQuery, webAppSummaryQuery, webAppBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Cost & Ranking — creative: assign a $ estimate per byte, requests, and RUM
@@ -21,6 +22,7 @@ export const CostRankingTab: React.FC = () => {
 
   const consumption = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const rows = useMemo(() => {
     const actionsBy: Record<string, number> = {};
@@ -80,6 +82,27 @@ export const CostRankingTab: React.FC = () => {
 
   const ranked = rows.slice().sort((a, b) => b.totalCost - a.totalCost);
 
+  // Bucketed proxy metrics for Movement column (actions ≈ RUM cost, sessions ≈ traffic).
+  const { bucketValuesBySort } = useBucketedRanks({
+    records: (bucketed.data?.records ?? []) as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["actions", "sessions", "errors"],
+  });
+  const bucketBySort = useMemo(() => ({
+    totalCost: bucketValuesBySort.actions ?? {},
+    costRum: bucketValuesBySort.actions ?? {},
+    costBandwidth: bucketValuesBySort.sessions ?? {},
+    costReqs: bucketValuesBySort.actions ?? {},
+  }), [bucketValuesBySort]);
+
+  const sortOptions: TLSortOption<typeof ranked[number]>[] = useMemo(() => [
+    { value: "totalCost",     label: "Total cost",       get: (r) => Number(r.totalCost),     higherIsBetter: false },
+    { value: "costBandwidth", label: "Bandwidth cost",   get: (r) => Number(r.costBandwidth), higherIsBetter: false },
+    { value: "costReqs",      label: "Request cost",     get: (r) => Number(r.costReqs),      higherIsBetter: false },
+    { value: "costRum",       label: "RUM capture cost", get: (r) => Number(r.costRum),       higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -116,7 +139,15 @@ export const CostRankingTab: React.FC = () => {
         subtitle="Combined bandwidth + request + RUM-capture cost per web app. Ranked highest to lowest."
       >
         {consumption.loading ? <EmptyState loading /> : ranked.length === 0 ? <EmptyState /> : (
-          <DataTable data={ranked} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={ranked}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={sortOptions}
+            defaultSort="totalCost"
+            bucketValuesBySort={bucketBySort}
+          />
         )}
       </SectionCard>
     </div>

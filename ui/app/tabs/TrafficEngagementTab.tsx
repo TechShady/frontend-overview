@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webAppSummaryQuery } from "../queries";
+import { webAppSummaryQuery, webAppBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Traffic & Engagement — sessions, users, bounce, session duration per web app.
@@ -14,6 +15,7 @@ export const TrafficEngagementTab: React.FC = () => {
   const sel = webAppFilter.selected;
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const rows = useMemo(() =>
     (sum.data?.records ?? []).map((r: any) => ({
@@ -64,6 +66,28 @@ export const TrafficEngagementTab: React.FC = () => {
       } },
   ], [maxSessions]);
 
+  // Bucketed movement data.
+  const { bucketValuesBySort } = useBucketedRanks({
+    records: (bucketed.data?.records ?? []) as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["sessions", "users", "actions", "avgDuration"],
+  });
+  const bucketBySort = useMemo(() => ({
+    sessions: bucketValuesBySort.sessions ?? {},
+    users: bucketValuesBySort.users ?? {},
+    actionsPerSession: bucketValuesBySort.actions ?? {},
+    avgDuration: bucketValuesBySort.avgDuration ?? {},
+  }), [bucketValuesBySort]);
+  const sortOptions: TLSortOption<typeof rows[number]>[] = useMemo(() => [
+    { value: "sessions",          label: "Sessions",             get: (r) => Number(r.sessions),          higherIsBetter: true },
+    { value: "users",             label: "Users",                get: (r) => Number(r.users),             higherIsBetter: true },
+    { value: "newUsersPct",       label: "New users %",          get: (r) => Number(r.newUsersPct),       higherIsBetter: true },
+    { value: "actionsPerSession", label: "Actions / session",    get: (r) => Number(r.actionsPerSession), higherIsBetter: true },
+    { value: "avgDuration",       label: "Avg session duration", get: (r) => Number(r.avgDuration),       higherIsBetter: true },
+    { value: "bounceRate",        label: "Bounce rate",          get: (r) => Number(r.bounceRate),        higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -74,7 +98,15 @@ export const TrafficEngagementTab: React.FC = () => {
 
       <SectionCard title="Traffic & engagement — per Web App">
         {sum.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={sum.error} /> : (
-          <DataTable data={rows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={rows}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={sortOptions}
+            defaultSort="sessions"
+            bucketValuesBySort={bucketBySort}
+          />
         )}
       </SectionCard>
     </div>

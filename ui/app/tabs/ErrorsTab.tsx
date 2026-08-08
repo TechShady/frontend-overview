@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { errorsPerAppQuery, jsErrorsQuery } from "../queries";
+import { errorsPerAppQuery, jsErrorsQuery, webAppBucketedMetricsQuery, errorsBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Errors & Reliability tab
@@ -15,6 +16,8 @@ export const ErrorsTab: React.FC = () => {
   const perApp = useDql(errorsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(errorsPerAppQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const jsErrs = useDql(jsErrorsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const errBucketed = useDql(errorsBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const rows = useMemo(() =>
     (perApp.data?.records ?? []).map((r: any) => ({
@@ -80,6 +83,53 @@ export const ErrorsTab: React.FC = () => {
       cell: ({ value }: any) => <span>{fmt.num(Number(value))}</span> },
   ], []);
 
+  // Bucketed movement data for per-app and per-error tables.
+  const { bucketValuesBySort: appBucket } = useBucketedRanks({
+    records: (bucketed.data?.records ?? []) as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["errors", "errorRate", "actions", "sessions"],
+  });
+  const perAppBucketBySort = useMemo(() => ({
+    totalErrors: appBucket.errors ?? {},
+    errorRate: appBucket.errorRate ?? {},
+    errSessionsPct: appBucket.errorRate ?? {},
+    totalActions: appBucket.actions ?? {},
+  }), [appBucket]);
+  const perAppSortOptions: TLSortOption<typeof rows[number]>[] = useMemo(() => [
+    { value: "totalErrors",    label: "Errors",              get: (r) => Number(r.totalErrors),    higherIsBetter: false },
+    { value: "errorRate",      label: "Error rate",          get: (r) => Number(r.errorRate),      higherIsBetter: false },
+    { value: "errSessionsPct", label: "Sessions w/ errors",  get: (r) => Number(r.errSessionsPct), higherIsBetter: false },
+    { value: "totalActions",   label: "Total actions",       get: (r) => Number(r.totalActions),   higherIsBetter: true },
+  ], []);
+
+  const { bucketValuesBySort: errBucket } = useBucketedRanks({
+    records: (errBucketed.data?.records ?? []) as any[],
+    rowKeyField: "errorMessage",
+    bucketField: "bkt",
+    metricFields: ["errors", "affectedSessions"],
+  });
+  const jsBucketBySort = useMemo(() => {
+    // Key by "application::errorMessage" — but bucketed query has no app column.
+    // Map errorMessage-only bucket data to same array under all app::msg keys.
+    const remap = (src: Record<string, (number | null)[]>): Record<string, (number | null)[]> => {
+      const out: Record<string, (number | null)[]> = {};
+      for (const r of topJsErrors) {
+        const key = `${r.application}::${r.errorMessage}`;
+        out[key] = src[r.errorMessage] ?? [];
+      }
+      return out;
+    };
+    return {
+      errors: remap(errBucket.errors ?? {}),
+      affectedSessions: remap(errBucket.affectedSessions ?? {}),
+    };
+  }, [errBucket, topJsErrors]);
+  const jsSortOptions: TLSortOption<typeof topJsErrors[number]>[] = useMemo(() => [
+    { value: "errors",           label: "Occurrences",       get: (r) => Number(r.errors),           higherIsBetter: false },
+    { value: "affectedSessions", label: "Sessions affected", get: (r) => Number(r.affectedSessions), higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -94,13 +144,29 @@ export const ErrorsTab: React.FC = () => {
 
       <SectionCard title="Error rate — per Web App" subtitle="Which web app is failing the most? Sort by error rate to find highest-impact issues.">
         {perApp.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={perApp.error} /> : (
-          <DataTable data={rows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={rows}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={perAppSortOptions}
+            defaultSort="errorRate"
+            bucketValuesBySort={perAppBucketBySort}
+          />
         )}
       </SectionCard>
 
       <SectionCard title="Top JavaScript errors" subtitle="Most common error messages across selected web apps. Click a row to inspect (coming soon).">
         {jsErrs.loading ? <EmptyState loading /> : topJsErrors.length === 0 ? <EmptyState error={jsErrs.error} label="No RUM errors captured." /> : (
-          <DataTable data={topJsErrors} columns={jsColumns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={topJsErrors}
+            columns={jsColumns}
+            rowKey={(r: any) => `${r.application}::${r.errorMessage}`}
+            firstColumnField="application"
+            sortOptions={jsSortOptions}
+            defaultSort="errors"
+            bucketValuesBySort={jsBucketBySort}
+          />
         )}
       </SectionCard>
     </div>

@@ -1,11 +1,12 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings, DEFAULT_PERF_BUDGETS } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webVitalsPerAppQuery, resourceConsumptionQuery, errorsPerAppQuery } from "../queries";
+import { webVitalsPerAppQuery, resourceConsumptionQuery, errorsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt } from "../components/layout";
 import { GradePill } from "../components/GradeBadge";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Perf Budgets — did each web app meet its budget for each metric?
@@ -17,6 +18,7 @@ export const PerfBudgetsTab: React.FC = () => {
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const resources = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const errs = useDql(errorsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const rows = useMemo(() => {
     const byApp: Record<string, any> = {};
@@ -77,6 +79,36 @@ export const PerfBudgetsTab: React.FC = () => {
     { id: "errorRate",        header: "Error rate",    accessor: "errorRate",       width: 100, cell: mkCheckCell("errorRate") },
   ], []);
 
+  // Bucketed movement data.
+  const { bucketValuesBySort: appBucket } = useBucketedRanks({
+    records: (bucketed.data?.records ?? []) as any[],
+    rowKeyField: "application",
+    bucketField: "bkt",
+    metricFields: ["lcp", "inp", "cls", "ttfb", "errorRate", "sessions"],
+  });
+  const bucketBySort = useMemo(() => ({
+    score: appBucket.errorRate ?? {},
+    passed: appBucket.errorRate ?? {},
+    lcp: appBucket.lcp ?? {},
+    inp: appBucket.inp ?? {},
+    cls: appBucket.cls ?? {},
+    ttfb: appBucket.ttfb ?? {},
+    errorRate: appBucket.errorRate ?? {},
+    bytesPerPage: appBucket.sessions ?? {},
+    requestsPerPage: appBucket.sessions ?? {},
+  }), [appBucket]);
+  const sortOptions: TLSortOption<any>[] = useMemo(() => [
+    { value: "score",           label: "Compliance",    get: (r) => Number(r.score),           higherIsBetter: true },
+    { value: "passed",          label: "Passed checks", get: (r) => Number(r.passed),          higherIsBetter: true },
+    { value: "lcp",             label: "LCP",           get: (r) => Number(r.lcp),             higherIsBetter: false },
+    { value: "inp",             label: "INP",           get: (r) => Number(r.inp),             higherIsBetter: false },
+    { value: "cls",             label: "CLS",           get: (r) => Number(r.cls),             higherIsBetter: false },
+    { value: "ttfb",            label: "TTFB",          get: (r) => Number(r.ttfb),            higherIsBetter: false },
+    { value: "bytesPerPage",    label: "Bytes / page",  get: (r) => Number(r.bytesPerPage),    higherIsBetter: false },
+    { value: "requestsPerPage", label: "Reqs / page",   get: (r) => Number(r.requestsPerPage), higherIsBetter: false },
+    { value: "errorRate",       label: "Error rate",    get: (r) => Number(r.errorRate),       higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -115,7 +147,15 @@ export const PerfBudgetsTab: React.FC = () => {
 
       <SectionCard title="Budget compliance — per Web App" subtitle="Green cell = passes budget, red = misses. Compliance grade is passed / total checks.">
         {vitals.loading || resources.loading || errs.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState /> : (
-          <DataTable data={rows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={rows as any[]}
+            columns={columns}
+            rowKey={(r: any) => String(r.application)}
+            firstColumnField="application"
+            sortOptions={sortOptions}
+            defaultSort="score"
+            bucketValuesBySort={bucketBySort}
+          />
         )}
       </SectionCard>
     </div>

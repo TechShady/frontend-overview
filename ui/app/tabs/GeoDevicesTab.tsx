@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { geoPerAppQuery, deviceBreakdownQuery } from "../queries";
+import { geoPerAppQuery, deviceBreakdownQuery, geoBucketedMetricsQuery, deviceBucketedMetricsQuery } from "../queries";
 import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
+import { useBucketedRanks } from "../hooks/useBucketedRanks";
 
 // ---------------------------------------------------------------------------
 // Geo & Devices — where users come from + what they use.
@@ -14,6 +15,8 @@ export const GeoDevicesTab: React.FC = () => {
   const sel = webAppFilter.selected;
   const geo = useDql(geoPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const devices = useDql(deviceBreakdownQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const geoBucketed = useDql(geoBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const devBucketed = useDql(deviceBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const geoRows = useMemo(() =>
     (geo.data?.records ?? []).map((r: any) => ({
@@ -82,6 +85,61 @@ export const GeoDevicesTab: React.FC = () => {
       cell: ({ value }: any) => <span>{fmt.ms(Number(value))}</span> },
   ], [maxDevSessions]);
 
+  // Bucketed movement data — geo keyed by country, remap onto app::country.
+  const { bucketValuesBySort: geoBucket } = useBucketedRanks({
+    records: (geoBucketed.data?.records ?? []) as any[],
+    rowKeyField: "country",
+    bucketField: "bkt",
+    metricFields: ["sessions", "actions", "errors", "avgDuration"],
+  });
+  const geoBucketBySort = useMemo(() => {
+    const remap = (src: Record<string, (number | null)[]>) => {
+      const out: Record<string, (number | null)[]> = {};
+      for (const r of geoRows) out[`${r.application}::${r.country}`] = src[r.country] ?? [];
+      return out;
+    };
+    return {
+      sessions: remap(geoBucket.sessions ?? {}),
+      users: remap(geoBucket.sessions ?? {}),
+      errors: remap(geoBucket.errors ?? {}),
+      avgDuration: remap(geoBucket.avgDuration ?? {}),
+    };
+  }, [geoBucket, geoRows]);
+  const geoSortOptions: TLSortOption<typeof geoRows[number]>[] = useMemo(() => [
+    { value: "sessions",    label: "Sessions",     get: (r) => Number(r.sessions),    higherIsBetter: true },
+    { value: "users",       label: "Users",        get: (r) => Number(r.users),       higherIsBetter: true },
+    { value: "errors",      label: "Errors",       get: (r) => Number(r.errors),      higherIsBetter: false },
+    { value: "avgDuration", label: "Avg duration", get: (r) => Number(r.avgDuration), higherIsBetter: false },
+  ], []);
+
+  // Bucketed device data — keyed by device type.
+  const { bucketValuesBySort: devBucket } = useBucketedRanks({
+    records: (devBucketed.data?.records ?? []) as any[],
+    rowKeyField: "device",
+    bucketField: "bkt",
+    metricFields: ["sessions", "actions", "errors", "avgDuration"],
+  });
+  const devBucketBySort = useMemo(() => {
+    const remap = (src: Record<string, (number | null)[]>) => {
+      const out: Record<string, (number | null)[]> = {};
+      for (const r of deviceRows) {
+        const k = `${r.application}::${r.browser}::${r.os}::${r.deviceType}`;
+        out[k] = src[r.deviceType] ?? [];
+      }
+      return out;
+    };
+    return {
+      sessions: remap(devBucket.sessions ?? {}),
+      errors: remap(devBucket.errors ?? {}),
+      avgDuration: remap(devBucket.avgDuration ?? {}),
+    };
+  }, [devBucket, deviceRows]);
+  const devSortOptions: TLSortOption<typeof deviceRows[number]>[] = useMemo(() => [
+    { value: "sessions",    label: "Sessions",     get: (r) => Number(r.sessions),    higherIsBetter: true },
+    { value: "errors",      label: "Errors",       get: (r) => Number(r.errors),      higherIsBetter: false },
+    { value: "avgDuration", label: "Avg duration", get: (r) => Number(r.avgDuration), higherIsBetter: false },
+  ], []);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -92,13 +150,29 @@ export const GeoDevicesTab: React.FC = () => {
 
       <SectionCard title="Geo breakdown — per Web App">
         {geo.loading ? <EmptyState loading /> : geoRows.length === 0 ? <EmptyState error={geo.error} /> : (
-          <DataTable data={geoRows} columns={geoCols} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={geoRows}
+            columns={geoCols}
+            rowKey={(r: any) => `${r.application}::${r.country}`}
+            firstColumnField="application"
+            sortOptions={geoSortOptions}
+            defaultSort="sessions"
+            bucketValuesBySort={geoBucketBySort}
+          />
         )}
       </SectionCard>
 
       <SectionCard title="Device / browser breakdown — per Web App">
         {devices.loading ? <EmptyState loading /> : deviceRows.length === 0 ? <EmptyState error={devices.error} /> : (
-          <DataTable data={deviceRows} columns={devCols} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
+          <TimelapseTable
+            data={deviceRows}
+            columns={devCols}
+            rowKey={(r: any) => `${r.application}::${r.browser}::${r.os}::${r.deviceType}`}
+            firstColumnField="application"
+            sortOptions={devSortOptions}
+            defaultSort="sessions"
+            bucketValuesBySort={devBucketBySort}
+          />
         )}
       </SectionCard>
     </div>

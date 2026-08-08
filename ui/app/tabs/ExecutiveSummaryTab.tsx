@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback } from "react";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
+import { TimelapseTable } from "../components/TimelapseTable";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery } from "../queries";
@@ -512,7 +513,13 @@ export const ExecutiveSummaryTab: React.FC = () => {
         title="Performance Snapshot"
         subtitle="Every key signal at a glance with its current health status."
       >
-        <DataTable data={snapshotRows} columns={snapshotColumns} variant={{ rowSeparation: "horizontalDividers" }} />
+        <TimelapseTable
+          data={snapshotRows}
+          columns={snapshotColumns}
+          rowKey={(r: any) => String(r.metric)}
+          firstColumnField="metric"
+          sortOptions={[{ value: "metric", label: "Metric", get: () => 0, higherIsBetter: true }]}
+        />
       </SectionCard>
     </div>
   );
