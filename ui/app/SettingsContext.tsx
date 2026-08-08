@@ -5,8 +5,7 @@ import { useUserAppState, useSetUserAppState } from "@dynatrace-sdk/react-hooks"
 // and the Settings sheet (visibility toggles).
 export const ALL_TABS: string[] = [
   "Executive Summary",
-  "Web Vitals",
-  "Performance",
+  "Performance Overview",
   "Errors & Reliability",
   "Navigation & Flows",
   "Resource Consumption",
@@ -14,6 +13,7 @@ export const ALL_TABS: string[] = [
   "Traffic & Engagement",
   "Geo & Devices",
   "Perf Budgets",
+  "Hyperlyzer",
   "Problems",
 ];
 

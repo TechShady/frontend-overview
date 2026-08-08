@@ -19,8 +19,7 @@ import { webAppInventoryQuery } from "./queries";
 import appConfig from "../../app.config.json";
 
 import { ExecutiveSummaryTab } from "./tabs/ExecutiveSummaryTab";
-import { WebVitalsTab } from "./tabs/WebVitalsTab";
-import { PerformanceTab } from "./tabs/PerformanceTab";
+import { PerformanceOverviewTab } from "./tabs/PerformanceOverviewTab";
 import { ErrorsTab } from "./tabs/ErrorsTab";
 import { NavigationFlowsTab } from "./tabs/NavigationFlowsTab";
 import { ResourceConsumptionTab } from "./tabs/ResourceConsumptionTab";
@@ -28,14 +27,14 @@ import { CostRankingTab } from "./tabs/CostRankingTab";
 import { TrafficEngagementTab } from "./tabs/TrafficEngagementTab";
 import { GeoDevicesTab } from "./tabs/GeoDevicesTab";
 import { PerfBudgetsTab } from "./tabs/PerfBudgetsTab";
+import { HyperlyzerTab } from "./tabs/HyperlyzerTab";
 import { ProblemsTab } from "./tabs/ProblemsTab";
 
 const APP_VERSION_LABEL = appConfig.app.version;
 
 const TAB_COMPONENTS: Record<string, React.FC> = {
   "Executive Summary": ExecutiveSummaryTab,
-  "Web Vitals": WebVitalsTab,
-  "Performance": PerformanceTab,
+  "Performance Overview": PerformanceOverviewTab,
   "Errors & Reliability": ErrorsTab,
   "Navigation & Flows": NavigationFlowsTab,
   "Resource Consumption": ResourceConsumptionTab,
@@ -43,6 +42,7 @@ const TAB_COMPONENTS: Record<string, React.FC> = {
   "Traffic & Engagement": TrafficEngagementTab,
   "Geo & Devices": GeoDevicesTab,
   "Perf Budgets": PerfBudgetsTab,
+  "Hyperlyzer": HyperlyzerTab,
   "Problems": ProblemsTab,
 };
 

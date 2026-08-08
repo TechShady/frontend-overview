@@ -27,24 +27,32 @@ export function webAppInventoryQuery(days: number): string {
   `;
 }
 
-// Per-web-app aggregate — sessions, users, actions, errors, avg duration.
+// Per-web-app aggregate — sessions, users, actions, errors, duration, Apdex.
 // Note: `dt.rum.user.id` is mostly null in this tenant → use session count as a proxy.
-// `avgDuration` returned in ms (converted from nanoseconds).
+// `avgDuration` returned in ms (converted from nanoseconds). Apdex uses 3s / 12s
+// thresholds on user_action/user_interaction events (industry standard).
 export function webAppSummaryQuery(days: number, selected: string | null, prev = false): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
     fetch user.events, ${periodClause(days, prev)}
     | filter isNotNull(frontend.name)${filt}
-    | fieldsAdd dur_ms = toDouble(duration) / 1000000.0
+    | fieldsAdd dur_ms = toDouble(duration) / 1000000.0,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"
     | summarize
         sessions = countDistinct(dt.rum.session.id),
         users = countDistinct(dt.rum.session.id),
-        actions = countIf(characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"),
+        actions = countIf(isAction),
         errors = countIf(characteristics.has_error == true),
-        avgDuration = avg(dur_ms),
+        avgDuration = avg(if(isAction, dur_ms)),
+        p50Duration = percentile(if(isAction, dur_ms), 50),
+        p90Duration = percentile(if(isAction, dur_ms), 90),
+        satisfied = countIf(isAction and dur_ms <= 3000),
+        tolerating = countIf(isAction and dur_ms > 3000 and dur_ms <= 12000),
+        frustrated = countIf(isAction and dur_ms > 12000),
         by:{application = frontend.name}
     | fieldsAdd
         errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100,
+        apdex = (toDouble(satisfied) + toDouble(tolerating) * 0.5) / (toDouble(satisfied + tolerating + frustrated) + 0.0001),
         newUsers = 0,
         bounceRate = 0.0
     | sort sessions desc
@@ -69,7 +77,8 @@ export function webVitalsPerAppQuery(days: number, selected: string | null): str
         inp_ms = toDouble(web_vitals.interaction_to_next_paint) / 1000000.0,
         cls_val = toDouble(web_vitals.cumulative_layout_shift),
         ttfb_ms = toDouble(web_vitals.time_to_first_byte) / 1000000.0,
-        fcp_ms = toDouble(web_vitals.first_contentful_paint) / 1000000.0
+        fcp_ms = toDouble(web_vitals.first_contentful_paint) / 1000000.0,
+        load_end_ms = toDouble(performance.load_event_end) / 1000000.0
     | summarize
         lcpAvg = avg(lcp_ms),
         lcpP75 = percentile(lcp_ms, 75),
@@ -80,6 +89,9 @@ export function webVitalsPerAppQuery(days: number, selected: string | null): str
         ttfbAvg = avg(ttfb_ms),
         ttfbP75 = percentile(ttfb_ms, 75),
         fcpAvg = avg(fcp_ms),
+        fcpP75 = percentile(fcp_ms, 75),
+        loadEndAvg = avg(load_end_ms),
+        loadEndP75 = percentile(load_end_ms, 75),
         samples = count(),
         by:{application = frontend.name}
     | sort samples desc

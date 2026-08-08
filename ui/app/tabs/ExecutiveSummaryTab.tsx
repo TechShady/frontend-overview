@@ -1,16 +1,105 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webAppSummaryQuery, webVitalsPerAppQuery, errorsPerAppQuery } from "../queries";
-import { computeAppScore, computeFleetScore, PerAppSummary, PerAppVitals } from "../scoring";
+import { webAppSummaryQuery, webVitalsPerAppQuery } from "../queries";
+import { computeAppScore, computeFleetScore } from "../scoring";
 import { KpiCard } from "../components/KpiCard";
-import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge";
-import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
+import { gradeFromScore } from "../components/GradeBadge";
+import { SectionCard, fmt } from "../components/layout";
 
 // ---------------------------------------------------------------------------
-// Executive Summary — fleet grade + per-app grade card table
+// Executive Summary — fleet-level report card
+// Report-card layout inspired by the user-journey-app executive summary,
+// adapted for a multi-app RUM fleet. Includes Copy Text + Export PDF buttons,
+// an overall letter grade with weighted score breakdown, an AI narrative,
+// key-metric KPI cards, Core Web Vitals cards, and a Performance Snapshot table.
 // ---------------------------------------------------------------------------
+
+const GREEN = "#0D9C29";
+const YELLOW = "#F9A825";
+const ORANGE = "#FB8C00";
+const RED = "#C21930";
+const BLUE = "#4589FF";
+const PURPLE = "#A56EFF";
+
+// -----------------------------------------------------------------------------
+// Helpers — thresholds
+// -----------------------------------------------------------------------------
+function apdexClr(v: number) {
+  if (!isFinite(v)) return "rgba(128,128,128,0.7)";
+  if (v >= 0.85) return GREEN;
+  if (v >= 0.7) return YELLOW;
+  return RED;
+}
+function apdexLabel(v: number) {
+  if (!isFinite(v)) return "—";
+  if (v >= 0.94) return "Excellent";
+  if (v >= 0.85) return "Good";
+  if (v >= 0.7) return "Fair";
+  if (v >= 0.5) return "Poor";
+  return "Unacceptable";
+}
+function errClr(pct: number) {
+  if (!isFinite(pct)) return "rgba(128,128,128,0.7)";
+  if (pct < 0.5) return GREEN;
+  if (pct < 1) return YELLOW;
+  if (pct < 5) return ORANGE;
+  return RED;
+}
+function durClr(ms: number) {
+  if (!isFinite(ms)) return "rgba(128,128,128,0.7)";
+  if (ms < 3000) return GREEN;
+  if (ms < 6000) return YELLOW;
+  return RED;
+}
+function cwvLcpClr(ms: number) { if (!isFinite(ms)) return "rgba(128,128,128,0.7)"; if (ms <= 2500) return GREEN; if (ms <= 4000) return YELLOW; return RED; }
+function cwvInpClr(ms: number) { if (!isFinite(ms)) return "rgba(128,128,128,0.7)"; if (ms <= 200) return GREEN; if (ms <= 500) return YELLOW; return RED; }
+function cwvClsClr(v: number) { if (!isFinite(v)) return "rgba(128,128,128,0.7)"; if (v <= 0.1) return GREEN; if (v <= 0.25) return YELLOW; return RED; }
+function cwvTtfbClr(ms: number) { if (!isFinite(ms)) return "rgba(128,128,128,0.7)"; if (ms <= 800) return GREEN; if (ms <= 1800) return YELLOW; return RED; }
+
+// -----------------------------------------------------------------------------
+// Section header — subtle divider used to group the report card
+// -----------------------------------------------------------------------------
+const SectionHeader: React.FC<{ title: string; subtitle?: string; icon?: React.ReactNode }> = ({ title, subtitle, icon }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "22px 20px 8px" }}>
+    {icon}
+    <div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 11, opacity: 0.6 }}>{subtitle}</div>}
+    </div>
+  </div>
+);
+
+// -----------------------------------------------------------------------------
+// Fleet-wide grade bar — one metric with weight, current value, and score bar
+// -----------------------------------------------------------------------------
+const GradeMetricRow: React.FC<{
+  label: string; weight: number; score: number; displayValue: string; color: string;
+}> = ({ label, weight, score, displayValue, color }) => {
+  const clamped = Math.max(0, Math.min(100, isFinite(score) ? score : 0));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0", borderBottom: "1px solid rgba(128,128,128,0.15)" }}>
+      <div style={{ width: 130, fontSize: 12, fontWeight: 600 }}>
+        {label}
+        <span style={{ opacity: 0.55, fontWeight: 500, marginLeft: 6 }}>({weight}%)</span>
+      </div>
+      <div style={{ flex: 1, height: 8, background: "rgba(128,128,128,0.15)", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${clamped}%`, background: color, transition: "width .35s ease" }} />
+      </div>
+      <div style={{ width: 96, textAlign: "right", fontSize: 12, fontFamily: "monospace", color, fontWeight: 700 }}>
+        {displayValue}
+      </div>
+      <div style={{ width: 44, textAlign: "right", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
+        {isFinite(score) ? `${clamped.toFixed(0)}/100` : "—"}
+      </div>
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------------------
+// Main component
+// -----------------------------------------------------------------------------
 export const ExecutiveSummaryTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
@@ -18,196 +107,412 @@ export const ExecutiveSummaryTab: React.FC = () => {
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const errs = useDql(errorsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
 
-  const summaries: PerAppSummary[] = useMemo(() => {
-    return (sum.data?.records ?? []).map((r: any) => ({
-      application: String(r.application ?? ""),
-      sessions: Number(r.sessions ?? 0),
-      users: Number(r.users ?? 0),
-      actions: Number(r.actions ?? 0),
-      errors: Number(r.errors ?? 0),
-      avgDuration: Number(r.avgDuration ?? 0),
-      bounces: Number(r.bounces ?? 0),
-      newUsers: Number(r.newUsers ?? 0),
-      errorRate: Number(r.errorRate ?? 0),
-      bounceRate: Number(r.bounceRate ?? 0),
-    }));
-  }, [sum.data]);
-
-  const prevSummaries: Record<string, PerAppSummary> = useMemo(() => {
-    const out: Record<string, PerAppSummary> = {};
-    (prev.data?.records ?? []).forEach((r: any) => {
+  const scoredRows = useMemo(() => {
+    const vRaw = vitals.data?.records ?? [];
+    const vByApp: Record<string, any> = {};
+    vRaw.forEach((r: any) => { vByApp[String(r.application ?? "")] = r; });
+    return (sum.data?.records ?? []).map((r: any) => {
       const app = String(r.application ?? "");
-      out[app] = {
+      const v = vByApp[app] || {};
+      const summary = {
         application: app,
         sessions: Number(r.sessions ?? 0),
         users: Number(r.users ?? 0),
         actions: Number(r.actions ?? 0),
         errors: Number(r.errors ?? 0),
         avgDuration: Number(r.avgDuration ?? 0),
-        bounces: Number(r.bounces ?? 0),
-        newUsers: Number(r.newUsers ?? 0),
+        apdex: Number(r.apdex ?? 0),
+        satisfied: Number(r.satisfied ?? 0),
+        tolerating: Number(r.tolerating ?? 0),
+        frustrated: Number(r.frustrated ?? 0),
         errorRate: Number(r.errorRate ?? 0),
-        bounceRate: Number(r.bounceRate ?? 0),
+        bounceRate: 0,
+        newUsers: 0,
+        bounces: 0,
       };
+      const vitalsRow = {
+        application: app,
+        lcpAvg: Number(v.lcpAvg ?? NaN),
+        inpAvg: Number(v.inpAvg ?? NaN),
+        clsAvg: Number(v.clsAvg ?? NaN),
+        ttfbAvg: Number(v.ttfbAvg ?? NaN),
+        fcpAvg: Number(v.fcpAvg ?? NaN),
+        loadEndAvg: Number(v.loadEndAvg ?? NaN),
+      };
+      const { score } = computeAppScore(vitalsRow, summary);
+      return { summary, vitals: vitalsRow, score };
     });
+  }, [sum.data, vitals.data]);
+
+  const prevByApp: Record<string, any> = useMemo(() => {
+    const out: Record<string, any> = {};
+    (prev.data?.records ?? []).forEach((r: any) => { out[String(r.application ?? "")] = r; });
     return out;
   }, [prev.data]);
 
-  const vitalsByApp: Record<string, PerAppVitals> = useMemo(() => {
-    const out: Record<string, PerAppVitals> = {};
-    (vitals.data?.records ?? []).forEach((r: any) => {
-      const app = String(r.application_name ?? r.application ?? "");
-      out[app] = {
-        application: app,
-        lcpAvg: Number(r.lcpAvg ?? NaN),
-        clsAvg: Number(r.clsAvg ?? NaN),
-        inpAvg: Number(r.inpAvg ?? NaN),
-        ttfbAvg: Number(r.ttfbAvg ?? NaN),
-      };
-    });
-    return out;
-  }, [vitals.data]);
+  const totals = useMemo(() => {
+    const T = { sessions: 0, users: 0, actions: 0, errors: 0,
+                satisfied: 0, tolerating: 0, frustrated: 0,
+                durWeighted: 0, durWeight: 0 };
+    for (const r of scoredRows) {
+      T.sessions += r.summary.sessions;
+      T.users += r.summary.users;
+      T.actions += r.summary.actions;
+      T.errors += r.summary.errors;
+      T.satisfied += r.summary.satisfied;
+      T.tolerating += r.summary.tolerating;
+      T.frustrated += r.summary.frustrated;
+      if (isFinite(r.summary.avgDuration) && r.summary.actions > 0) {
+        T.durWeighted += r.summary.avgDuration * r.summary.actions;
+        T.durWeight += r.summary.actions;
+      }
+    }
+    const apdexDen = T.satisfied + T.tolerating + T.frustrated;
+    const apdex = apdexDen > 0 ? (T.satisfied + T.tolerating * 0.5) / apdexDen : NaN;
+    const avgDur = T.durWeight > 0 ? T.durWeighted / T.durWeight : NaN;
+    const errorRate = T.actions > 0 ? (T.errors / T.actions) * 100 : 0;
+    return { ...T, apdex, avgDur, errorRate };
+  }, [scoredRows]);
 
-  const scoredRows = useMemo(() => {
-    return summaries.map((s) => {
-      const v = vitalsByApp[s.application];
-      const { score, parts } = computeAppScore(v, s);
-      return { ...s, vitals: v, score, parts };
-    });
-  }, [summaries, vitalsByApp]);
+  const prevTotals = useMemo(() => {
+    let sessions = 0, actions = 0, errors = 0, sat = 0, tol = 0, frus = 0, dW = 0, dN = 0;
+    for (const r of Object.values(prevByApp)) {
+      const rr = r as any;
+      sessions += Number(rr.sessions ?? 0);
+      actions += Number(rr.actions ?? 0);
+      errors += Number(rr.errors ?? 0);
+      sat += Number(rr.satisfied ?? 0);
+      tol += Number(rr.tolerating ?? 0);
+      frus += Number(rr.frustrated ?? 0);
+      const dur = Number(rr.avgDuration ?? 0), n = Number(rr.actions ?? 0);
+      if (isFinite(dur) && n > 0) { dW += dur * n; dN += n; }
+    }
+    const den = sat + tol + frus;
+    return {
+      sessions, actions, errors,
+      apdex: den > 0 ? (sat + tol * 0.5) / den : NaN,
+      avgDur: dN > 0 ? dW / dN : NaN,
+      errorRate: actions > 0 ? (errors / actions) * 100 : 0,
+    };
+  }, [prevByApp]);
+
+  const fleetVitals = useMemo(() => {
+    let lN = 0, lW = 0, iN = 0, iW = 0, cN = 0, cW = 0, tN = 0, tW = 0;
+    for (const r of scoredRows) {
+      const w = r.summary.sessions || 1;
+      const v = r.vitals;
+      if (isFinite(v.lcpAvg)) { lN += v.lcpAvg * w; lW += w; }
+      if (isFinite(v.inpAvg)) { iN += v.inpAvg * w; iW += w; }
+      if (isFinite(v.clsAvg)) { cN += v.clsAvg * w; cW += w; }
+      if (isFinite(v.ttfbAvg)) { tN += v.ttfbAvg * w; tW += w; }
+    }
+    return {
+      lcp: lW > 0 ? lN / lW : NaN,
+      inp: iW > 0 ? iN / iW : NaN,
+      cls: cW > 0 ? cN / cW : NaN,
+      ttfb: tW > 0 ? tN / tW : NaN,
+    };
+  }, [scoredRows]);
 
   const fleetScore = useMemo(() =>
-    computeFleetScore(scoredRows.map((r) => ({ score: r.score, sessions: r.sessions }))),
+    computeFleetScore(scoredRows.map((r) => ({ score: r.score, sessions: r.summary.sessions }))),
   [scoredRows]);
+  const grade = gradeFromScore(fleetScore);
 
-  const prevFleetScore = useMemo(() => {
-    const rows = summaries.map((s) => {
-      const prevS = prevSummaries[s.application];
-      const v = vitalsByApp[s.application];
-      const { score } = computeAppScore(v, prevS);
-      return { score, sessions: prevS?.sessions ?? 0 };
-    });
-    return computeFleetScore(rows);
-  }, [summaries, prevSummaries, vitalsByApp]);
+  const scoreLB = (v: number, good: number, poor: number) => {
+    if (!isFinite(v)) return NaN;
+    if (v <= good) return 100;
+    if (v >= poor) return 0;
+    return 100 * (1 - (v - good) / (poor - good));
+  };
+  const scoreHB = (v: number, poor: number, good: number) => {
+    if (!isFinite(v)) return NaN;
+    if (v >= good) return 100;
+    if (v <= poor) return 0;
+    return 100 * ((v - poor) / (good - poor));
+  };
+  const gradeMetrics = useMemo(() => [
+    { label: "Apdex", weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94), value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—", color: apdexClr(totals.apdex) },
+    { label: "Error rate", weight: 20, score: scoreLB(totals.errorRate, 0.5, 5), value: fmt.pct(totals.errorRate), color: errClr(totals.errorRate) },
+    { label: "Avg duration", weight: 15, score: scoreLB(totals.avgDur, 1000, 8000), value: fmt.ms(totals.avgDur), color: durClr(totals.avgDur) },
+    { label: "CWV — LCP", weight: 15, score: scoreLB(fleetVitals.lcp, 2500, 4000), value: fmt.ms(fleetVitals.lcp), color: cwvLcpClr(fleetVitals.lcp) },
+    { label: "CWV — INP", weight: 15, score: scoreLB(fleetVitals.inp, 200, 500), value: fmt.ms(fleetVitals.inp), color: cwvInpClr(fleetVitals.inp) },
+    { label: "CWV — CLS", weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25), value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls) },
+  ], [totals, fleetVitals]);
 
-  const totalSessions = scoredRows.reduce((a, r) => a + r.sessions, 0);
-  const totalActions = scoredRows.reduce((a, r) => a + r.actions, 0);
-  const totalErrors = scoredRows.reduce((a, r) => a + r.errors, 0);
-  const prevSessions = Object.values(prevSummaries).reduce((a, r) => a + r.sessions, 0);
-  const prevActions = Object.values(prevSummaries).reduce((a, r) => a + r.actions, 0);
-  const prevErrors = Object.values(prevSummaries).reduce((a, r) => a + r.errors, 0);
+  const narrative = useMemo(() => {
+    const lines: string[] = [];
+    const scope = sel ? `web app "${sel}"` : `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`;
+    const period = timeframeDays >= 1 ? `${timeframeDays} day${timeframeDays === 1 ? "" : "s"}` : `${Math.round(timeframeDays * 24)} hours`;
+    lines.push(`Over the last ${period}, ${scope} handled ${fmt.num(totals.sessions)} session${totals.sessions === 1 ? "" : "s"} and ${fmt.num(totals.actions)} user actions.`);
+    if (isFinite(totals.apdex)) {
+      const q = apdexLabel(totals.apdex).toLowerCase();
+      lines.push(`Fleet Apdex is ${totals.apdex.toFixed(2)} (${q}) — ${fmt.num(totals.frustrated)} action${totals.frustrated === 1 ? "" : "s"} classified as frustrated.`);
+    }
+    if (totals.errorRate > 1) {
+      lines.push(`Error rate is ${fmt.pct(totals.errorRate)}, above the 1% healthy threshold. Prioritise the noisy applications on the Errors tab.`);
+    } else if (totals.errorRate > 0) {
+      lines.push(`Error rate is ${fmt.pct(totals.errorRate)} — within the healthy range.`);
+    }
+    if (isFinite(fleetVitals.lcp) && fleetVitals.lcp > 4000) {
+      lines.push(`LCP averages ${fmt.ms(fleetVitals.lcp)} — outside the Web Vitals target. Investigate render-blocking resources on the Hyperlyzer tab.`);
+    } else if (isFinite(fleetVitals.lcp) && fleetVitals.lcp > 2500) {
+      lines.push(`LCP averages ${fmt.ms(fleetVitals.lcp)} — needs improvement.`);
+    }
+    if (isFinite(prevTotals.apdex) && isFinite(totals.apdex)) {
+      const delta = totals.apdex - prevTotals.apdex;
+      if (Math.abs(delta) > 0.02) {
+        lines.push(`Apdex is ${delta > 0 ? "up" : "down"} ${Math.abs(delta * 100).toFixed(1)} points versus the previous period.`);
+      }
+    }
+    const worst = scoredRows.slice().filter((r) => isFinite(r.score) && r.summary.sessions > 0).sort((a, b) => a.score - b.score)[0];
+    if (worst && scoredRows.length > 1) {
+      lines.push(`Weakest app: ${worst.summary.application} (grade ${gradeFromScore(worst.score).letter}, ${worst.score.toFixed(0)}/100).`);
+    }
+    const best = scoredRows.slice().filter((r) => isFinite(r.score) && r.summary.sessions > 0).sort((a, b) => b.score - a.score)[0];
+    if (best && scoredRows.length > 1) {
+      lines.push(`Strongest app: ${best.summary.application} (grade ${gradeFromScore(best.score).letter}, ${best.score.toFixed(0)}/100).`);
+    }
+    return lines;
+  }, [totals, prevTotals, fleetVitals, sel, timeframeDays, scoredRows]);
 
-  const tableRows = useMemo(() =>
-    scoredRows.slice().sort((a, b) => b.sessions - a.sessions).map((r) => ({
-      application: r.application,
-      grade: r.score,
-      sessions: r.sessions,
-      users: r.users,
-      actions: r.actions,
-      errorRate: r.errorRate,
-      bounceRate: r.bounceRate,
-      lcp: r.vitals?.lcpAvg ?? NaN,
-      inp: r.vitals?.inpAvg ?? NaN,
-      cls: r.vitals?.clsAvg ?? NaN,
-    })),
-  [scoredRows]);
+  const snapshotRows = useMemo(() => [
+    { metric: "Total Sessions", value: fmt.num(totals.sessions), status: totals.sessions > 0 ? "Active" : "No traffic",
+      statusColor: totals.sessions > 0 ? GREEN : "rgba(128,128,128,0.7)" },
+    { metric: "Total Actions", value: fmt.num(totals.actions), status: totals.actions > 0 ? "Active" : "No activity",
+      statusColor: totals.actions > 0 ? GREEN : "rgba(128,128,128,0.7)" },
+    { metric: "Apdex", value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—", status: apdexLabel(totals.apdex),
+      statusColor: apdexClr(totals.apdex) },
+    { metric: "Avg Duration", value: fmt.ms(totals.avgDur),
+      status: !isFinite(totals.avgDur) ? "—" : totals.avgDur < 3000 ? "Fast" : totals.avgDur < 6000 ? "Acceptable" : "Slow",
+      statusColor: durClr(totals.avgDur) },
+    { metric: "Error Rate", value: fmt.pct(totals.errorRate),
+      status: totals.errorRate < 0.5 ? "Healthy" : totals.errorRate < 1 ? "Watch" : totals.errorRate < 5 ? "Degraded" : "Critical",
+      statusColor: errClr(totals.errorRate) },
+    { metric: "Frustrated %", value: totals.actions > 0 ? fmt.pct((totals.frustrated / totals.actions) * 100) : "—",
+      status: totals.frustrated / (totals.actions || 1) < 0.05 ? "Healthy" : totals.frustrated / (totals.actions || 1) < 0.15 ? "Watch" : "Critical",
+      statusColor: totals.frustrated / (totals.actions || 1) < 0.05 ? GREEN : totals.frustrated / (totals.actions || 1) < 0.15 ? YELLOW : RED },
+    { metric: "Fleet LCP", value: fmt.ms(fleetVitals.lcp), status: !isFinite(fleetVitals.lcp) ? "—" : fleetVitals.lcp <= 2500 ? "Good" : fleetVitals.lcp <= 4000 ? "Needs improvement" : "Poor",
+      statusColor: cwvLcpClr(fleetVitals.lcp) },
+    { metric: "Fleet INP", value: fmt.ms(fleetVitals.inp), status: !isFinite(fleetVitals.inp) ? "—" : fleetVitals.inp <= 200 ? "Good" : fleetVitals.inp <= 500 ? "Needs improvement" : "Poor",
+      statusColor: cwvInpClr(fleetVitals.inp) },
+    { metric: "Fleet CLS", value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—", status: !isFinite(fleetVitals.cls) ? "—" : fleetVitals.cls <= 0.1 ? "Good" : fleetVitals.cls <= 0.25 ? "Needs improvement" : "Poor",
+      statusColor: cwvClsClr(fleetVitals.cls) },
+    { metric: "Fleet TTFB", value: fmt.ms(fleetVitals.ttfb), status: !isFinite(fleetVitals.ttfb) ? "—" : fleetVitals.ttfb <= 800 ? "Good" : fleetVitals.ttfb <= 1800 ? "Needs improvement" : "Poor",
+      statusColor: cwvTtfbClr(fleetVitals.ttfb) },
+  ], [totals, fleetVitals]);
 
-  const maxSessions = Math.max(1, ...tableRows.map((r) => r.sessions));
-
-  const columns: any = useMemo(() => [
-    { id: "application", header: "Web App", accessor: "application", width: 220,
+  const snapshotColumns: any = useMemo(() => [
+    { id: "metric", header: "Metric", accessor: "metric", width: 220,
       cell: ({ value }: any) => <span style={{ fontWeight: 600 }}>{String(value)}</span> },
-    { id: "grade", header: "Grade", accessor: "grade", width: 90, sortType: "number" as any,
-      cell: ({ value }: any) => <GradePill score={Number(value)} showScore /> },
-    { id: "sessions", header: "Sessions", accessor: "sessions", width: 160, sortType: "number" as any,
-      cell: ({ value }: any) => <InlineBar value={Number(value)} max={maxSessions} color="#4589FF" /> },
-    { id: "users", header: "Users", accessor: "users", width: 90, sortType: "number" as any,
-      cell: ({ value }: any) => <span>{fmt.num(Number(value))}</span> },
-    { id: "actions", header: "Actions", accessor: "actions", width: 100, sortType: "number" as any,
-      cell: ({ value }: any) => <span>{fmt.num(Number(value))}</span> },
-    { id: "errorRate", header: "Error rate", accessor: "errorRate", width: 100, sortType: "number" as any,
-      cell: ({ value }: any) => {
-        const v = Number(value);
-        const col = v > 5 ? "#C21930" : v > 1 ? "#F9A825" : "#0D9C29";
-        return <span style={{ color: col, fontWeight: 600 }}>{fmt.pct(v)}</span>;
+    { id: "value", header: "Value", accessor: "value", width: 160,
+      cell: ({ value }: any) => <span style={{ fontFamily: "monospace" }}>{String(value)}</span> },
+    { id: "status", header: "Status", accessor: "status", width: 220,
+      cell: ({ value, row }: any) => {
+        const c = row?.original?.statusColor ?? "rgba(128,128,128,0.7)";
+        return <span style={{ color: c, fontWeight: 700 }}>{String(value)}</span>;
       } },
-    { id: "bounceRate", header: "Bounce", accessor: "bounceRate", width: 90, sortType: "number" as any,
-      cell: ({ value }: any) => <span>{fmt.pct(Number(value))}</span> },
-    { id: "lcp", header: "LCP", accessor: "lcp", width: 90, sortType: "number" as any,
-      cell: ({ value }: any) => {
-        const v = Number(value);
-        const col = v > 4000 ? "#C21930" : v > 2500 ? "#F9A825" : "#0D9C29";
-        return <span style={{ color: col }}>{fmt.ms(v)}</span>;
-      } },
-    { id: "inp", header: "INP", accessor: "inp", width: 90, sortType: "number" as any,
-      cell: ({ value }: any) => {
-        const v = Number(value);
-        const col = v > 500 ? "#C21930" : v > 200 ? "#F9A825" : "#0D9C29";
-        return <span style={{ color: col }}>{fmt.ms(v)}</span>;
-      } },
-    { id: "cls", header: "CLS", accessor: "cls", width: 80, sortType: "number" as any,
-      cell: ({ value }: any) => {
-        const v = Number(value);
-        const col = v > 0.25 ? "#C21930" : v > 0.1 ? "#F9A825" : "#0D9C29";
-        return <span style={{ color: col }}>{isFinite(v) ? v.toFixed(2) : "—"}</span>;
-      } },
-  ], [maxSessions]);
+  ], []);
 
-  const loading = sum.loading || vitals.loading;
-  const gradeInfo = gradeFromScore(fleetScore);
+  const copyReportText = useCallback(() => {
+    const lines: string[] = [];
+    lines.push("=== Frontend Overview — Executive Summary ===");
+    lines.push(`Scope: ${sel ?? `${scoredRows.length} web apps`}`);
+    lines.push(`Period: last ${timeframeDays >= 1 ? `${timeframeDays} days` : `${Math.round(timeframeDays * 24)}h`}`);
+    lines.push("");
+    lines.push(`Overall Grade: ${grade.letter} (${isFinite(fleetScore) ? fleetScore.toFixed(0) : "—"}/100)`);
+    lines.push("");
+    lines.push("--- Grade breakdown ---");
+    gradeMetrics.forEach((m) => lines.push(`  ${m.label} (${m.weight}%): ${m.value} — ${isFinite(m.score) ? m.score.toFixed(0) + "/100" : "—"}`));
+    lines.push("");
+    lines.push("--- Narrative ---");
+    narrative.forEach((l) => lines.push(l));
+    lines.push("");
+    lines.push("--- Key metrics ---");
+    lines.push(`  Sessions:   ${fmt.num(totals.sessions)}`);
+    lines.push(`  Actions:    ${fmt.num(totals.actions)}`);
+    lines.push(`  Errors:     ${fmt.num(totals.errors)} (${fmt.pct(totals.errorRate)})`);
+    lines.push(`  Apdex:      ${isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"}`);
+    lines.push(`  Avg dur:    ${fmt.ms(totals.avgDur)}`);
+    lines.push("");
+    lines.push("--- Core Web Vitals ---");
+    lines.push(`  LCP:  ${fmt.ms(fleetVitals.lcp)}`);
+    lines.push(`  INP:  ${fmt.ms(fleetVitals.inp)}`);
+    lines.push(`  CLS:  ${isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"}`);
+    lines.push(`  TTFB: ${fmt.ms(fleetVitals.ttfb)}`);
+    navigator.clipboard.writeText(lines.join("\n"))
+      .then(() => console.log("Copied executive summary to clipboard"))
+      .catch((e) => console.warn("Copy failed", e));
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals]);
+
+  const exportReport = useCallback(() => {
+    const scopeLabel = sel ?? `${scoredRows.length} web apps`;
+    const periodLabel = timeframeDays >= 1 ? `${timeframeDays} days` : `${Math.round(timeframeDays * 24)}h`;
+    const html = `
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Executive Summary — ${scopeLabel}</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; padding: 32px; color: #1f2233; background: #fff; }
+  h1 { margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .grade { display: flex; align-items: center; gap: 24px; padding: 20px; border: 2px solid ${grade.color}; border-radius: 12px; margin-bottom: 24px; }
+  .letter { font-size: 72px; font-weight: 900; color: ${grade.color}; line-height: 1; }
+  .score { font-size: 15px; color: #555; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-size: 13px; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid #eee; text-align: left; }
+  th { background: #f6f7fb; font-weight: 700; }
+  .metric-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .metric-label { width: 180px; font-weight: 600; }
+  .bar-bg { flex: 1; height: 10px; background: #eee; border-radius: 5px; overflow: hidden; }
+  .metric-value { width: 100px; text-align: right; font-family: monospace; font-weight: 700; }
+  .narrative { padding: 14px; background: #f6f7fb; border-left: 4px solid #4589FF; margin-bottom: 24px; }
+  .narrative p { margin: 6px 0; font-size: 14px; }
+  h2 { margin-top: 28px; border-bottom: 2px solid #e0e0e0; padding-bottom: 6px; }
+</style></head>
+<body>
+  <h1>Executive Summary</h1>
+  <div class="sub">Scope: <b>${scopeLabel}</b> · Period: last ${periodLabel} · Generated ${new Date().toLocaleString()}</div>
+
+  <div class="grade">
+    <div class="letter">${grade.letter}</div>
+    <div>
+      <div style="font-size: 20px; font-weight: 700;">Fleet Grade</div>
+      <div class="score">Weighted score: <b>${isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"} / 100</b></div>
+    </div>
+  </div>
+
+  <h2>Grade Breakdown</h2>
+  ${gradeMetrics.map((m) => `
+    <div class="metric-row">
+      <div class="metric-label">${m.label} <span style="color:#888; font-weight:normal;">(${m.weight}%)</span></div>
+      <div class="bar-bg"><div style="height:100%; width:${Math.max(0, Math.min(100, m.score || 0))}%; background:${m.color};"></div></div>
+      <div class="metric-value" style="color:${m.color};">${m.value}</div>
+      <div style="width:60px; text-align:right; font-family:monospace; color:#888;">${isFinite(m.score) ? m.score.toFixed(0) + "/100" : "—"}</div>
+    </div>`).join("")}
+
+  <h2>AI Executive Narrative</h2>
+  <div class="narrative">${narrative.map((l) => `<p>${l}</p>`).join("")}</div>
+
+  <h2>Key Metrics</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th></tr>
+    <tr><td>Sessions</td><td>${fmt.num(totals.sessions)}</td></tr>
+    <tr><td>Actions</td><td>${fmt.num(totals.actions)}</td></tr>
+    <tr><td>Errors</td><td>${fmt.num(totals.errors)} (${fmt.pct(totals.errorRate)})</td></tr>
+    <tr><td>Apdex</td><td>${isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"}</td></tr>
+    <tr><td>Avg duration</td><td>${fmt.ms(totals.avgDur)}</td></tr>
+  </table>
+
+  <h2>Core Web Vitals</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th><th>Status</th></tr>
+    <tr><td>LCP</td><td>${fmt.ms(fleetVitals.lcp)}</td><td style="color:${cwvLcpClr(fleetVitals.lcp)};">${!isFinite(fleetVitals.lcp) ? "—" : fleetVitals.lcp <= 2500 ? "Good" : fleetVitals.lcp <= 4000 ? "Needs improvement" : "Poor"}</td></tr>
+    <tr><td>INP</td><td>${fmt.ms(fleetVitals.inp)}</td><td style="color:${cwvInpClr(fleetVitals.inp)};">${!isFinite(fleetVitals.inp) ? "—" : fleetVitals.inp <= 200 ? "Good" : fleetVitals.inp <= 500 ? "Needs improvement" : "Poor"}</td></tr>
+    <tr><td>CLS</td><td>${isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"}</td><td style="color:${cwvClsClr(fleetVitals.cls)};">${!isFinite(fleetVitals.cls) ? "—" : fleetVitals.cls <= 0.1 ? "Good" : fleetVitals.cls <= 0.25 ? "Needs improvement" : "Poor"}</td></tr>
+    <tr><td>TTFB</td><td>${fmt.ms(fleetVitals.ttfb)}</td><td style="color:${cwvTtfbClr(fleetVitals.ttfb)};">${!isFinite(fleetVitals.ttfb) ? "—" : fleetVitals.ttfb <= 800 ? "Good" : fleetVitals.ttfb <= 1800 ? "Needs improvement" : "Poor"}</td></tr>
+  </table>
+
+  <script>window.onload = () => setTimeout(() => window.print(), 400);</script>
+</body></html>
+    `;
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); }
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals]);
 
   return (
     <div>
-      {/* Fleet-wide top row */}
-      <div style={{ display: "flex", gap: 20, alignItems: "center", padding: "20px 20px 4px" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-          <GradeBadge score={fleetScore} size={92} label="Fleet Grade" />
-          {isFinite(prevFleetScore) && (
-            <div style={{ fontSize: 11, opacity: 0.65 }}>
-              prev period: <span style={{ color: gradeFromScore(prevFleetScore).color, fontWeight: 700 }}>{gradeFromScore(prevFleetScore).letter}</span> ({prevFleetScore.toFixed(0)})
-            </div>
-          )}
+      {/* Header bar with export/copy buttons */}
+      <div style={{ display: "flex", alignItems: "center", padding: "20px 20px 0", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2 }}>Executive Summary</div>
+          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 2 }}>
+            Scope: <b>{sel ?? `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`}</b> ·
+            Period: last {timeframeDays >= 1 ? `${timeframeDays} day${timeframeDays === 1 ? "" : "s"}` : `${Math.round(timeframeDays * 24)}h`}
+          </div>
         </div>
-        <div style={{ flex: 1, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <KpiCard label="Web apps" value={String(scoredRows.length)} rawValue={scoredRows.length} color="#4589FF" />
-          <KpiCard label="Sessions" value={fmt.num(totalSessions)} rawValue={totalSessions} prevRawValue={prevSessions} color="#4589FF" higherIsBetter />
-          <KpiCard label="Actions" value={fmt.num(totalActions)} rawValue={totalActions} prevRawValue={prevActions} color="#08BDBA" higherIsBetter />
-          <KpiCard label="Errors" value={fmt.num(totalErrors)} rawValue={totalErrors} prevRawValue={prevErrors} color="#C21930" />
-          <KpiCard label="Error rate" value={fmt.pct(totalActions > 0 ? (totalErrors / totalActions) * 100 : 0)} rawValue={totalActions > 0 ? (totalErrors / totalActions) * 100 : 0} prevRawValue={prevActions > 0 ? (prevErrors / prevActions) * 100 : null} color="#C21930" />
+        <button className="uj-export-btn" onClick={copyReportText}
+          title="Copy summary text to clipboard"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(128,128,128,0.08)", color: "inherit", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+            <rect x="6" y="6" width="10" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <rect x="4" y="2" width="10" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+          Copy Text
+        </button>
+        <button className="uj-export-btn" onClick={exportReport}
+          title="Export as printable HTML report"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(69,137,255,0.12)", color: "inherit", border: "1px solid rgba(69,137,255,0.45)", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+            <path d="M10 3 v9 M6 8 l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <path d="M3 15 v2 a1 1 0 0 0 1 1 h12 a1 1 0 0 0 1-1 v-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+          </svg>
+          Export PDF
+        </button>
+      </div>
+
+      {/* Overall grade card */}
+      <div className="uj-grade-card" style={{ margin: "16px 20px 8px", padding: 20, border: `2px solid ${grade.color}55`, borderRadius: 14, background: `${grade.color}0d`, display: "flex", alignItems: "center", gap: 24 }}>
+        <div style={{ fontSize: 96, fontWeight: 900, color: grade.color, lineHeight: 1, letterSpacing: -3, minWidth: 120, textAlign: "center" }}>{grade.letter}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>Overall Fleet Grade</div>
+          <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>Weighted score: <b>{isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"}</b> / 100</div>
+          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>Blend of Apdex (25%), Error rate (20%), Duration (15%), CWV — LCP (15%), INP (15%), CLS (10%).</div>
         </div>
       </div>
 
-      <SectionCard
-        title="Per Web-App Grade Breakdown"
-        subtitle={`Composite letter grade blends Core Web Vitals (LCP/INP/CLS/TTFB), error rate, and bounce rate. Weighted by session traffic. ${scoredRows.length} apps evaluated.`}
-      >
-        {loading ? <EmptyState loading /> : tableRows.length === 0 ? <EmptyState /> : (
-          <DataTable data={tableRows} columns={columns} sortable resizable variant={{ rowSeparation: "horizontalDividers" }} />
-        )}
+      {/* Grade breakdown bars */}
+      <SectionCard title="Grade Breakdown" subtitle="Weighted contributors to the overall fleet grade.">
+        <div>
+          {gradeMetrics.map((m) => (
+            <GradeMetricRow key={m.label} label={m.label} weight={m.weight} score={m.score} displayValue={m.value} color={m.color} />
+          ))}
+        </div>
       </SectionCard>
 
-      {/* Grade legend */}
-      <SectionCard title="How the grade is calculated">
-        <div style={{ fontSize: 12, opacity: 0.85, display: "flex", flexDirection: "column", gap: 6 }}>
-          <div>Each web app's composite score is a weighted blend of six health signals. Higher is better.</div>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
-            {[
-              { label: "LCP", pct: "22%", target: "< 2.5s" },
-              { label: "INP", pct: "18%", target: "< 200ms" },
-              { label: "CLS", pct: "12%", target: "< 0.1" },
-              { label: "TTFB", pct: "8%", target: "< 800ms" },
-              { label: "Error rate", pct: "25%", target: "< 0.5%" },
-              { label: "Bounce rate", pct: "15%", target: "< 30%" },
-            ].map((p) => (
-              <div key={p.label} style={{ padding: "6px 12px", border: "1px solid rgba(128,128,128,0.25)", borderRadius: 8, fontSize: 11 }}>
-                <div style={{ fontWeight: 700 }}>{p.label} <span style={{ opacity: 0.65 }}>({p.pct})</span></div>
-                <div style={{ opacity: 0.7 }}>target: {p.target}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* AI narrative */}
+      <SectionHeader
+        title="AI Executive Narrative"
+        subtitle="Auto-generated summary of the current period."
+        icon={
+          <svg width="20" height="20" viewBox="0 0 20 20">
+            <path d="M10 2 L12 8 L18 10 L12 12 L10 18 L8 12 L2 10 L8 8 Z" fill={PURPLE} opacity="0.9" />
+          </svg>
+        }
+      />
+      <div style={{ margin: "0 20px 4px", padding: 16, borderLeft: `4px solid ${PURPLE}`, background: `${PURPLE}0d`, borderRadius: "0 10px 10px 0" }}>
+        {narrative.map((line, i) => (
+          <div key={i} style={{ fontSize: 13, lineHeight: 1.6, margin: "4px 0" }}>{line}</div>
+        ))}
+      </div>
+
+      {/* Key Metrics KPI cards */}
+      <SectionHeader title="Key Metrics" subtitle="Traffic, quality and reliability snapshot." />
+      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color={BLUE} higherIsBetter />
+        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter />
+        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color={GREEN} higherIsBetter />
+        <KpiCard label="Avg Duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color={BLUE} />
+        <KpiCard label="Error Rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color={RED} />
+      </div>
+
+      {/* Core Web Vitals KPI cards */}
+      <SectionHeader title="Core Web Vitals" subtitle="Fleet-wide, session-weighted averages." />
+      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <KpiCard label="LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color={cwvLcpClr(fleetVitals.lcp)} subtext="target ≤ 2.5s" />
+        <KpiCard label="INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color={cwvInpClr(fleetVitals.inp)} subtext="target ≤ 200ms" />
+        <KpiCard label="CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color={cwvClsClr(fleetVitals.cls)} subtext="target ≤ 0.1" />
+        <KpiCard label="TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color={cwvTtfbClr(fleetVitals.ttfb)} subtext="target ≤ 800ms" />
+      </div>
+
+      {/* Performance Snapshot table */}
+      <SectionCard
+        title="Performance Snapshot"
+        subtitle="Every key signal at a glance with its current health status."
+      >
+        <DataTable data={snapshotRows} columns={snapshotColumns} variant={{ rowSeparation: "horizontalDividers" }} />
       </SectionCard>
     </div>
   );
