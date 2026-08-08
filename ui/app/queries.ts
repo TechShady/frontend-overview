@@ -356,7 +356,7 @@ export function webAppBucketedMetricsQuery(days: number, selected: string | null
     | fieldsAdd
         dur_ms = toDouble(duration) / 1000000.0,
         isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
-        bkt = bin(timestamp, ${label})
+        bkt = bin(start_time, ${label})
     | summarize
         sessions = countDistinct(dt.rum.session.id),
         users = countDistinct(dt.rum.session.id),
@@ -387,7 +387,7 @@ export function pagesBucketedMetricsQuery(days: number, selected: string | null)
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(view.url_path)${filt}
-    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | fieldsAdd bkt = bin(start_time, ${label}), dur_ms = toDouble(duration) / 1000000.0
     | summarize
         views = count(),
         sessions = countDistinct(dt.rum.session.id),
@@ -406,7 +406,7 @@ export function geoBucketedMetricsQuery(days: number, selected: string | null): 
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
-    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | fieldsAdd bkt = bin(start_time, ${label}), dur_ms = toDouble(duration) / 1000000.0
     | summarize
         sessions = countDistinct(dt.rum.session.id),
         actions = count(),
@@ -425,7 +425,7 @@ export function deviceBucketedMetricsQuery(days: number, selected: string | null
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(device.type)${filt}
-    | fieldsAdd bkt = bin(timestamp, ${label}), dur_ms = toDouble(duration) / 1000000.0
+    | fieldsAdd bkt = bin(start_time, ${label}), dur_ms = toDouble(duration) / 1000000.0
     | summarize
         sessions = countDistinct(dt.rum.session.id),
         actions = count(),
@@ -444,7 +444,7 @@ export function errorsBucketedMetricsQuery(days: number, selected: string | null
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and characteristics.has_error == true${filt}
-    | fieldsAdd bkt = bin(timestamp, ${label})
+    | fieldsAdd bkt = bin(start_time, ${label})
     | summarize
         errors = count(),
         affectedSessions = countDistinct(dt.rum.session.id),

@@ -124,6 +124,25 @@ export function TimelapseTable<T extends Record<string, any>>({
     return rankOf(values, sortOpt.higherIsBetter ?? true);
   }, [data, rowKey, sortOpt]);
 
+  // Report bucket count + hotness (per-bucket summed activity) to Timelapse
+  // header. Hotness = sum of all rows' values for the current sort per bucket.
+  useEffect(() => {
+    if (bucketCount > 0 && bucketValues) {
+      tl.reportBuckets(bucketCount);
+      const hot = new Array(bucketCount).fill(0);
+      for (const arr of Object.values(bucketValues)) {
+        for (let i = 0; i < bucketCount; i++) {
+          const v = arr[i];
+          if (v != null && isFinite(v as number)) hot[i] += v as number;
+        }
+      }
+      tl.reportHotness(hot, sortValue);
+    } else {
+      tl.reportBuckets(0);
+      tl.reportHotness([]);
+    }
+  }, [bucketCount, bucketValues, sortValue, tl.reportBuckets, tl.reportHotness]);
+
   // Playback index: when TL is ON, playbackIdx = tl.index, else = last bucket
   const playbackIdx = tl.enabled && bucketCount > 0
     ? Math.min(tl.index, bucketCount - 1)
