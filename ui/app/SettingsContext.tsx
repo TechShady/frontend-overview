@@ -162,8 +162,16 @@ export function periodClause(days: number, prev = false): string {
     const from = to - durMs;
     return `from: "${toIso(from)}", to: "${toIso(to)}"`;
   }
-  if (prev) return `from: now()-${d * 2}d, to: now()-${d}d`;
-  return `from: now()-${d}d`;
+  // DQL rejects fractional duration units — emit integer h/m depending on size.
+  const totalMinutes = Math.max(1, Math.round(d * 24 * 60));
+  const unit = totalMinutes >= 24 * 60 && totalMinutes % (24 * 60) === 0 ? "d"
+             : totalMinutes >= 60 && totalMinutes % 60 === 0 ? "h"
+             : "m";
+  const n = unit === "d" ? Math.round(totalMinutes / 1440)
+          : unit === "h" ? Math.round(totalMinutes / 60)
+          : totalMinutes;
+  if (prev) return `from: now()-${n * 2}${unit}, to: now()-${n}${unit}`;
+  return `from: now()-${n}${unit}`;
 }
 
 export function webAppFilterClause(selected: string | null, field = "application"): string {

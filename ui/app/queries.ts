@@ -347,9 +347,9 @@ export function bucketSizeForDays(days: number): { label: string; ms: number; co
   };
 }
 
-export function webAppBucketedMetricsQuery(days: number, selected: string | null): string {
+export function webAppBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
-  const { label } = bucketSizeForDays(days);
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -381,9 +381,9 @@ export function webAppBucketedMetricsQuery(days: number, selected: string | null
 }
 
 // Same shape but keyed by page/view — for NavigationFlows Top Pages table.
-export function pagesBucketedMetricsQuery(days: number, selected: string | null): string {
+export function pagesBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
-  const { label } = bucketSizeForDays(days);
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(view.url_path)${filt}
@@ -400,9 +400,9 @@ export function pagesBucketedMetricsQuery(days: number, selected: string | null)
 }
 
 // Bucketed geo — per country per bucket.
-export function geoBucketedMetricsQuery(days: number, selected: string | null): string {
+export function geoBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
-  const { label } = bucketSizeForDays(days);
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
@@ -419,9 +419,9 @@ export function geoBucketedMetricsQuery(days: number, selected: string | null): 
 }
 
 // Bucketed device breakdown.
-export function deviceBucketedMetricsQuery(days: number, selected: string | null): string {
+export function deviceBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
-  const { label } = bucketSizeForDays(days);
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(device.type)${filt}
@@ -438,9 +438,9 @@ export function deviceBucketedMetricsQuery(days: number, selected: string | null
 }
 
 // Bucketed error types — per (application, errorType).
-export function errorsBucketedMetricsQuery(days: number, selected: string | null): string {
+export function errorsBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
-  const { label } = bucketSizeForDays(days);
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and characteristics.has_error == true${filt}

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
-import { Select } from "@dynatrace/strato-components/forms";
 import { useTimelapse } from "../TimelapseContext";
 import { EmptyState } from "./layout";
 
@@ -124,24 +123,8 @@ export function TimelapseTable<T extends Record<string, any>>({
     return rankOf(values, sortOpt.higherIsBetter ?? true);
   }, [data, rowKey, sortOpt]);
 
-  // Report bucket count + hotness (per-bucket summed activity) to Timelapse
-  // header. Hotness = sum of all rows' values for the current sort per bucket.
-  useEffect(() => {
-    if (bucketCount > 0 && bucketValues) {
-      tl.reportBuckets(bucketCount);
-      const hot = new Array(bucketCount).fill(0);
-      for (const arr of Object.values(bucketValues)) {
-        for (let i = 0; i < bucketCount; i++) {
-          const v = arr[i];
-          if (v != null && isFinite(v as number)) hot[i] += v as number;
-        }
-      }
-      tl.reportHotness(hot, sortValue);
-    } else {
-      tl.reportBuckets(0);
-      tl.reportHotness([]);
-    }
-  }, [bucketCount, bucketValues, sortValue, tl.reportBuckets, tl.reportHotness]);
+  // NOTE: bucket count + hotness are published centrally by AppInner from
+  // the shared TL metrics query — tables no longer report to avoid overwriting.
 
   // Playback index: when TL is ON, playbackIdx = tl.index, else = last bucket
   const playbackIdx = tl.enabled && bucketCount > 0
@@ -290,39 +273,24 @@ export function TimelapseTable<T extends Record<string, any>>({
 
   return (
     <div>
-      {/* Sort selector + Movement badge */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, textTransform: "uppercase", opacity: 0.65, letterSpacing: 0.5 }}>Sort & Movement by</span>
-        <div style={{ minWidth: 190 }}>
-          <Select
-            name="tl-sort"
-            value={sortValue}
-            onChange={(v: any) => { const first = Array.isArray(v) ? v[0] : v; if (first) setSortValue(String(first)); }}
-          >
-            <Select.Content>
-              {sortOptions.map((opt) => (
-                <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
-              ))}
-            </Select.Content>
-          </Select>
+      {/* Movement / bucket status strip — sort is driven by column header clicks */}
+      {(tl.enabled || bucketCount > 0) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, fontSize: 11, opacity: 0.7 }}>
+          {tl.enabled && bucketCount > 0 && (
+            <span style={{ fontFamily: "monospace" }}>
+              bucket {playbackIdx + 1}/{bucketCount}
+              {tl.playing && <span style={{ marginLeft: 8, color: "#4589FF" }}>▶ playing</span>}
+            </span>
+          )}
+          {!bucketValues && (
+            <span style={{ opacity: 0.5 }}>Movement: no bucket data</span>
+          )}
+          {bucketValues && !tl.enabled && bucketCount > 0 && (
+            <span style={{ opacity: 0.65 }}>Movement: first → last of {bucketCount} buckets by {sortOpt?.label ?? sortValue}</span>
+          )}
+          <span style={{ marginLeft: "auto", opacity: 0.45 }}>Click a column header to sort</span>
         </div>
-        {tl.enabled && bucketCount > 0 && (
-          <span style={{ fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
-            bucket {playbackIdx + 1}/{bucketCount}
-            {tl.playing && <span style={{ marginLeft: 8, color: "#4589FF" }}>▶ playing</span>}
-          </span>
-        )}
-        {!bucketValues && (
-          <span style={{ fontSize: 10, opacity: 0.5, marginLeft: "auto" }}>
-            Movement: no bucket data
-          </span>
-        )}
-        {bucketValues && !tl.enabled && bucketCount > 0 && (
-          <span style={{ fontSize: 10, opacity: 0.55, marginLeft: "auto" }}>
-            Movement: first → last of {bucketCount} buckets
-          </span>
-        )}
-      </div>
+      )}
 
       {loading ? <EmptyState loading /> : decorated.length === 0 ? <EmptyState label={emptyLabel} /> : (
         <DataTable data={decorated} columns={wrappedColumns} sortable resizable={resizable !== false} variant={variant ?? { rowSeparation: "horizontalDividers" }} />

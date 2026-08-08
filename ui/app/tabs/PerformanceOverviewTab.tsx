@@ -9,6 +9,7 @@ import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge"
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Performance Overview
@@ -39,11 +40,13 @@ type ExtendedVitals = PerAppVitals & {
 export const PerformanceOverviewTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
 
   const summaries: EnrichedSummary[] = useMemo(() => {
     return (sum.data?.records ?? []).map((r: any) => ({
@@ -328,6 +331,97 @@ export const PerformanceOverviewTab: React.FC = () => {
     return out;
   }, [bucketValuesBySort]);
 
+  // -----------------------------------------------------------------------
+  // Fleet sparklines — aggregate across apps per bucket. Sums for counts,
+  // weighted averages for rates/durations.
+  // -----------------------------------------------------------------------
+  const fleetSparklines = useMemo(() => {
+    const recs = bucketedRecords as any[];
+    if (recs.length === 0) return null;
+    const buckets = Array.from(new Set(recs.map((r) => String(r.bkt ?? "")))).filter(Boolean).sort();
+    const idx: Record<string, number> = {}; buckets.forEach((b, i) => { idx[b] = i; });
+    const N = buckets.length;
+    const zeros = () => new Array<number>(N).fill(0);
+    const sessions = zeros(), actions = zeros(), errors = zeros(),
+          satisfied = zeros(), tolerating = zeros(), frustrated = zeros();
+    // For weighted avgs: numerator + denominator per bucket.
+    const durNum = zeros(), durDen = zeros();
+    const lcpNum = zeros(), lcpDen = zeros();
+    const inpNum = zeros(), inpDen = zeros();
+    const clsNum = zeros(), clsDen = zeros();
+    const ttfbNum = zeros(), ttfbDen = zeros();
+    const loadNum = zeros(), loadDen = zeros();
+    for (const r of recs) {
+      const i = idx[String(r.bkt ?? "")];
+      if (i == null) continue;
+      const s = Number(r.sessions ?? 0), a = Number(r.actions ?? 0), e = Number(r.errors ?? 0);
+      sessions[i] += s;
+      actions[i] += a;
+      errors[i] += e;
+      satisfied[i] += Number(r.satisfied ?? 0);
+      tolerating[i] += Number(r.tolerating ?? 0);
+      frustrated[i] += Number(r.frustrated ?? 0);
+      const wAction = a > 0 ? a : 0;
+      const wSess = s > 0 ? s : 0;
+      const push = (num: number[], den: number[], v: any, w: number) => {
+        const n = Number(v);
+        if (isFinite(n) && n > 0 && w > 0) { num[i] += n * w; den[i] += w; }
+      };
+      push(durNum, durDen, r.avgDuration, wAction);
+      push(lcpNum, lcpDen, r.lcp, wSess);
+      push(inpNum, inpDen, r.inp, wSess);
+      push(clsNum, clsDen, r.cls, wSess);
+      push(ttfbNum, ttfbDen, r.ttfb, wSess);
+      push(loadNum, loadDen, r.loadEnd, wSess);
+    }
+    const div = (n: number[], d: number[]) => n.map((v, i) => d[i] > 0 ? v / d[i] : 0);
+    const errorRate = actions.map((a, i) => a > 0 ? (errors[i] / a) * 100 : 0);
+    const apdex = actions.map((_, i) => {
+      const den = satisfied[i] + tolerating[i] + frustrated[i];
+      return den > 0 ? (satisfied[i] + tolerating[i] * 0.5) / den : 0;
+    });
+    return {
+      buckets,
+      sessions, actions, errors, errorRate, satisfied, tolerating, frustrated,
+      avgDur: div(durNum, durDen), apdex,
+      lcp: div(lcpNum, lcpDen), inp: div(inpNum, inpDen), cls: div(clsNum, clsDen),
+      ttfb: div(ttfbNum, ttfbDen), loadEnd: div(loadNum, loadDen),
+    };
+  }, [bucketedRecords]);
+
+  // When TL is on, KPI cards should show the current-bucket aggregate (animated).
+  // Otherwise show timeframe totals.
+  const tlIdx = tl.enabled && fleetSparklines ? Math.min(Math.max(tl.index, 0), fleetSparklines.buckets.length - 1) : -1;
+  const kpi = useMemo(() => {
+    if (tlIdx >= 0 && fleetSparklines) {
+      const i = tlIdx;
+      return {
+        sessions: fleetSparklines.sessions[i],
+        actions: fleetSparklines.actions[i],
+        errors: fleetSparklines.errors[i],
+        errorRate: fleetSparklines.errorRate[i],
+        satisfied: fleetSparklines.satisfied[i],
+        tolerating: fleetSparklines.tolerating[i],
+        frustrated: fleetSparklines.frustrated[i],
+        apdex: fleetSparklines.apdex[i],
+        avgDur: fleetSparklines.avgDur[i],
+        lcp: fleetSparklines.lcp[i],
+        inp: fleetSparklines.inp[i],
+        cls: fleetSparklines.cls[i],
+        ttfb: fleetSparklines.ttfb[i],
+        loadEnd: fleetSparklines.loadEnd[i],
+      };
+    }
+    return {
+      sessions: totals.sessions, actions: totals.actions, errors: totals.errors,
+      errorRate: totals.errorRate, satisfied: totals.satisfied, tolerating: totals.tolerating,
+      frustrated: totals.frustrated, apdex: totals.apdex, avgDur: totals.avgDur,
+      lcp: fleetVitals.lcp, inp: fleetVitals.inp, cls: fleetVitals.cls,
+      ttfb: fleetVitals.ttfb, loadEnd: fleetVitals.loadEnd,
+    };
+  }, [tlIdx, fleetSparklines, totals, fleetVitals]);
+  const spk = fleetSparklines;
+
   return (
     <div>
       {/* Unified 5-column KPI grid — Fleet Grade spans first column (all 3 rows), KPIs align in 5 equal columns */}
@@ -349,25 +443,25 @@ export const PerformanceOverviewTab: React.FC = () => {
         </div>
 
         {/* Row 1: Primary counters */}
-        <KpiCard label="Web apps" value={String(scoredRows.length)} rawValue={scoredRows.length} color="#4589FF" />
-        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color="#4589FF" higherIsBetter />
-        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter />
-        <KpiCard label="Errors" value={fmt.num(totals.errors)} rawValue={totals.errors} prevRawValue={prevTotals.errors} color="#C21930" />
-        <KpiCard label="Error rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color="#C21930" />
+        <KpiCard label="Web apps" value={String(scoredRows.length)} rawValue={scoredRows.length} color="#4589FF" sparkline={spk?.sessions.map(() => scoredRows.length)} />
+        <KpiCard label="Sessions" value={fmt.num(kpi.sessions)} rawValue={kpi.sessions} prevRawValue={prevTotals.sessions} color="#4589FF" higherIsBetter sparkline={spk?.sessions} />
+        <KpiCard label="Actions" value={fmt.num(kpi.actions)} rawValue={kpi.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter sparkline={spk?.actions} />
+        <KpiCard label="Errors" value={fmt.num(kpi.errors)} rawValue={kpi.errors} prevRawValue={prevTotals.errors} color="#C21930" sparkline={spk?.errors} />
+        <KpiCard label="Error rate" value={fmt.pct(kpi.errorRate)} rawValue={kpi.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color="#C21930" sparkline={spk?.errorRate} />
 
         {/* Row 2: Performance & Apdex */}
-        <KpiCard label="Avg session duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color="#4589FF" />
-        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color="#0D9C29" higherIsBetter />
-        <KpiCard label="Satisfied actions" value={fmt.num(totals.satisfied)} rawValue={totals.satisfied} prevRawValue={prevTotals.satisfied} color="#0D9C29" higherIsBetter />
-        <KpiCard label="Tolerating actions" value={fmt.num(totals.tolerating)} rawValue={totals.tolerating} prevRawValue={prevTotals.tolerating} color="#F9A825" />
-        <KpiCard label="Frustrated actions" value={fmt.num(totals.frustrated)} rawValue={totals.frustrated} prevRawValue={prevTotals.frustrated} color="#C21930" />
+        <KpiCard label="Avg session duration" value={fmt.ms(kpi.avgDur)} rawValue={isFinite(kpi.avgDur) ? kpi.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color="#4589FF" sparkline={spk?.avgDur} />
+        <KpiCard label="Apdex" value={isFinite(kpi.apdex) ? kpi.apdex.toFixed(2) : "—"} rawValue={isFinite(kpi.apdex) ? kpi.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color="#0D9C29" higherIsBetter sparkline={spk?.apdex} />
+        <KpiCard label="Satisfied actions" value={fmt.num(kpi.satisfied)} rawValue={kpi.satisfied} prevRawValue={prevTotals.satisfied} color="#0D9C29" higherIsBetter sparkline={spk?.satisfied} />
+        <KpiCard label="Tolerating actions" value={fmt.num(kpi.tolerating)} rawValue={kpi.tolerating} prevRawValue={prevTotals.tolerating} color="#F9A825" sparkline={spk?.tolerating} />
+        <KpiCard label="Frustrated actions" value={fmt.num(kpi.frustrated)} rawValue={kpi.frustrated} prevRawValue={prevTotals.frustrated} color="#C21930" sparkline={spk?.frustrated} />
 
         {/* Row 3: Fleet Core Web Vitals */}
-        <KpiCard label="Fleet LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color="#4589FF" subtext="target ≤ 2.5s" />
-        <KpiCard label="Fleet INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color="#08BDBA" subtext="target ≤ 200ms" />
-        <KpiCard label="Fleet CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color="#A56EFF" subtext="target ≤ 0.1" />
-        <KpiCard label="Fleet TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color="#F9A825" subtext="target ≤ 800ms" />
-        <KpiCard label="Load event end" value={fmt.ms(fleetVitals.loadEnd)} rawValue={isFinite(fleetVitals.loadEnd) ? fleetVitals.loadEnd : undefined} color="#FF7A56" subtext="target ≤ 2.5s" />
+        <KpiCard label="Fleet LCP" value={fmt.ms(kpi.lcp)} rawValue={isFinite(kpi.lcp) ? kpi.lcp : undefined} color="#4589FF" subtext="target ≤ 2.5s" sparkline={spk?.lcp} />
+        <KpiCard label="Fleet INP" value={fmt.ms(kpi.inp)} rawValue={isFinite(kpi.inp) ? kpi.inp : undefined} color="#08BDBA" subtext="target ≤ 200ms" sparkline={spk?.inp} />
+        <KpiCard label="Fleet CLS" value={isFinite(kpi.cls) ? kpi.cls.toFixed(3) : "—"} rawValue={isFinite(kpi.cls) ? kpi.cls : undefined} color="#A56EFF" subtext="target ≤ 0.1" sparkline={spk?.cls} />
+        <KpiCard label="Fleet TTFB" value={fmt.ms(kpi.ttfb)} rawValue={isFinite(kpi.ttfb) ? kpi.ttfb : undefined} color="#F9A825" subtext="target ≤ 800ms" sparkline={spk?.ttfb} />
+        <KpiCard label="Load event end" value={fmt.ms(kpi.loadEnd)} rawValue={isFinite(kpi.loadEnd) ? kpi.loadEnd : undefined} color="#FF7A56" subtext="target ≤ 2.5s" sparkline={spk?.loadEnd} />
       </div>
 
       <SectionCard
