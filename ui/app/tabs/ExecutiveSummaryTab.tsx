@@ -3,11 +3,13 @@ import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { TimelapseTable } from "../components/TimelapseTable";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webAppSummaryQuery, webVitalsPerAppQuery } from "../queries";
+import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
 import { computeAppScore, computeFleetScore } from "../scoring";
 import { KpiCard } from "../components/KpiCard";
 import { gradeFromScore } from "../components/GradeBadge";
 import { SectionCard, fmt } from "../components/layout";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Executive Summary — fleet-level report card
@@ -104,10 +106,14 @@ const GradeMetricRow: React.FC<{
 export const ExecutiveSummaryTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const scoredRows = useMemo(() => {
     const vRaw = vitals.data?.records ?? [];
@@ -492,20 +498,20 @@ export const ExecutiveSummaryTab: React.FC = () => {
       {/* Key Metrics KPI cards */}
       <SectionHeader title="Key Metrics" subtitle="Traffic, quality and reliability snapshot." />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color={BLUE} higherIsBetter />
-        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter />
-        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color={GREEN} higherIsBetter />
-        <KpiCard label="Avg Duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color={BLUE} />
-        <KpiCard label="Error Rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color={RED} />
+        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color={BLUE} higherIsBetter sparkline={spk?.sessions} />
+        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter sparkline={spk?.actions} />
+        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color={GREEN} higherIsBetter sparkline={spk?.apdex} />
+        <KpiCard label="Avg Duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color={BLUE} sparkline={spk?.avgDur} />
+        <KpiCard label="Error Rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color={RED} sparkline={spk?.errorRate} />
       </div>
 
       {/* Core Web Vitals KPI cards */}
       <SectionHeader title="Core Web Vitals" subtitle="Fleet-wide, session-weighted averages." />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-        <KpiCard label="LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color={cwvLcpClr(fleetVitals.lcp)} subtext="target ≤ 2.5s" />
-        <KpiCard label="INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color={cwvInpClr(fleetVitals.inp)} subtext="target ≤ 200ms" />
-        <KpiCard label="CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color={cwvClsClr(fleetVitals.cls)} subtext="target ≤ 0.1" />
-        <KpiCard label="TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color={cwvTtfbClr(fleetVitals.ttfb)} subtext="target ≤ 800ms" />
+        <KpiCard label="LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color={cwvLcpClr(fleetVitals.lcp)} subtext="target ≤ 2.5s" sparkline={spk?.lcp} />
+        <KpiCard label="INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color={cwvInpClr(fleetVitals.inp)} subtext="target ≤ 200ms" sparkline={spk?.inp} />
+        <KpiCard label="CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color={cwvClsClr(fleetVitals.cls)} subtext="target ≤ 0.1" sparkline={spk?.cls} />
+        <KpiCard label="TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color={cwvTtfbClr(fleetVitals.ttfb)} subtext="target ≤ 800ms" sparkline={spk?.ttfb} />
       </div>
 
       {/* Performance Snapshot table */}

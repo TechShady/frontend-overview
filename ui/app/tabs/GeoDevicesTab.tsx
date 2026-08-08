@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useBucketedSums } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Geo & Devices — where users come from + what they use.
@@ -13,10 +15,13 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const GeoDevicesTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
   const geo = useDql(geoPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const devices = useDql(deviceBreakdownQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const geoBucketed = useDql(geoBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const devBucketed = useDql(deviceBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const geoBucketed = useDql(geoBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const devBucketed = useDql(deviceBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const geoSpk = useBucketedSums(geoBucketed.data?.records, ["sessions", "users", "errors"] as const);
 
   const geoRows = useMemo(() =>
     (geo.data?.records ?? []).map((r: any) => ({
@@ -143,9 +148,9 @@ export const GeoDevicesTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Countries" value={String(countries)} rawValue={countries} color="#4589FF" />
-        <KpiCard label="Top country" value={topCountry.name} subtext={`${fmt.num(topCountry.count)} sessions`} color="#08BDBA" />
-        <KpiCard label="Top browser" value={topBrowser.name} subtext={`${fmt.num(topBrowser.count)} sessions`} color="#A56EFF" />
+        <KpiCard label="Countries" value={String(countries)} rawValue={countries} color="#4589FF" sparkline={geoSpk?.sessions} />
+        <KpiCard label="Top country" value={topCountry.name} subtext={`${fmt.num(topCountry.count)} sessions`} color="#08BDBA" rawValue={topCountry.count} sparkline={geoSpk?.sessions} />
+        <KpiCard label="Top browser" value={topBrowser.name} subtext={`${fmt.num(topBrowser.count)} sessions`} color="#A56EFF" rawValue={topBrowser.count} sparkline={geoSpk?.users} />
       </div>
 
       <SectionCard title="Geo breakdown — per Web App">

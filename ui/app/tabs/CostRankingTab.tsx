@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Cost & Ranking — creative: assign a $ estimate per byte, requests, and RUM
@@ -15,6 +17,8 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const CostRankingTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
   const [rateBandwidth, setRateBandwidth] = useState(0.08); // $ per GB egress
   const [rateReq, setRateReq] = useState(0.0000004);       // $ per HTTP request (CDN)
@@ -22,7 +26,8 @@ export const CostRankingTab: React.FC = () => {
 
   const consumption = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const rows = useMemo(() => {
     const actionsBy: Record<string, number> = {};
@@ -106,9 +111,9 @@ export const CostRankingTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Estimated fleet cost" value={`$${totalCost.toFixed(2)}`} rawValue={totalCost} color="#FF832B" />
-        <KpiCard label="Most expensive web app" value={mostExpensive?.application ?? "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" />
-        <KpiCard label="Cost / user action" value={`$${costPerAction.toFixed(5)}`} rawValue={costPerAction} color="#A56EFF" />
+        <KpiCard label="Estimated fleet cost" value={`$${totalCost.toFixed(2)}`} rawValue={totalCost} color="#FF832B" sparkline={spk?.actions} />
+        <KpiCard label="Most expensive web app" value={mostExpensive?.application ?? "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" rawValue={mostExpensive?.totalCost} sparkline={spk?.actions} />
+        <KpiCard label="Cost / user action" value={`$${costPerAction.toFixed(5)}`} rawValue={costPerAction} color="#A56EFF" sparkline={spk?.actions} />
       </div>
 
       <SectionCard

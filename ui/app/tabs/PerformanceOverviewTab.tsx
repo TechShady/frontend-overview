@@ -9,6 +9,7 @@ import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge"
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
 import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
@@ -332,62 +333,9 @@ export const PerformanceOverviewTab: React.FC = () => {
   }, [bucketValuesBySort]);
 
   // -----------------------------------------------------------------------
-  // Fleet sparklines — aggregate across apps per bucket. Sums for counts,
-  // weighted averages for rates/durations.
+  // Fleet sparklines — aggregate across apps per bucket.
   // -----------------------------------------------------------------------
-  const fleetSparklines = useMemo(() => {
-    const recs = bucketedRecords as any[];
-    if (recs.length === 0) return null;
-    const buckets = Array.from(new Set(recs.map((r) => String(r.bkt ?? "")))).filter(Boolean).sort();
-    const idx: Record<string, number> = {}; buckets.forEach((b, i) => { idx[b] = i; });
-    const N = buckets.length;
-    const zeros = () => new Array<number>(N).fill(0);
-    const sessions = zeros(), actions = zeros(), errors = zeros(),
-          satisfied = zeros(), tolerating = zeros(), frustrated = zeros();
-    // For weighted avgs: numerator + denominator per bucket.
-    const durNum = zeros(), durDen = zeros();
-    const lcpNum = zeros(), lcpDen = zeros();
-    const inpNum = zeros(), inpDen = zeros();
-    const clsNum = zeros(), clsDen = zeros();
-    const ttfbNum = zeros(), ttfbDen = zeros();
-    const loadNum = zeros(), loadDen = zeros();
-    for (const r of recs) {
-      const i = idx[String(r.bkt ?? "")];
-      if (i == null) continue;
-      const s = Number(r.sessions ?? 0), a = Number(r.actions ?? 0), e = Number(r.errors ?? 0);
-      sessions[i] += s;
-      actions[i] += a;
-      errors[i] += e;
-      satisfied[i] += Number(r.satisfied ?? 0);
-      tolerating[i] += Number(r.tolerating ?? 0);
-      frustrated[i] += Number(r.frustrated ?? 0);
-      const wAction = a > 0 ? a : 0;
-      const wSess = s > 0 ? s : 0;
-      const push = (num: number[], den: number[], v: any, w: number) => {
-        const n = Number(v);
-        if (isFinite(n) && n > 0 && w > 0) { num[i] += n * w; den[i] += w; }
-      };
-      push(durNum, durDen, r.avgDuration, wAction);
-      push(lcpNum, lcpDen, r.lcp, wSess);
-      push(inpNum, inpDen, r.inp, wSess);
-      push(clsNum, clsDen, r.cls, wSess);
-      push(ttfbNum, ttfbDen, r.ttfb, wSess);
-      push(loadNum, loadDen, r.loadEnd, wSess);
-    }
-    const div = (n: number[], d: number[]) => n.map((v, i) => d[i] > 0 ? v / d[i] : 0);
-    const errorRate = actions.map((a, i) => a > 0 ? (errors[i] / a) * 100 : 0);
-    const apdex = actions.map((_, i) => {
-      const den = satisfied[i] + tolerating[i] + frustrated[i];
-      return den > 0 ? (satisfied[i] + tolerating[i] * 0.5) / den : 0;
-    });
-    return {
-      buckets,
-      sessions, actions, errors, errorRate, satisfied, tolerating, frustrated,
-      avgDur: div(durNum, durDen), apdex,
-      lcp: div(lcpNum, lcpDen), inp: div(inpNum, inpDen), cls: div(clsNum, clsDen),
-      ttfb: div(ttfbNum, ttfbDen), loadEnd: div(loadNum, loadDen),
-    };
-  }, [bucketedRecords]);
+  const fleetSparklines = useFleetSparklines(bucketedRecords);
 
   // When TL is on, KPI cards should show the current-bucket aggregate (animated).
   // Otherwise show timeframe totals.

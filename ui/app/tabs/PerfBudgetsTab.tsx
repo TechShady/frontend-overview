@@ -7,6 +7,8 @@ import { SectionCard, EmptyState, fmt } from "../components/layout";
 import { GradePill } from "../components/GradeBadge";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Perf Budgets — did each web app meet its budget for each metric?
@@ -14,11 +16,14 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const PerfBudgetsTab: React.FC = () => {
   const { timeframeDays, webAppFilter, budgets, setBudgets } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const resources = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const errs = useDql(errorsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const rows = useMemo(() => {
     const byApp: Record<string, any> = {};
@@ -112,8 +117,8 @@ export const PerfBudgetsTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Web apps meeting all budgets" value={String(totalPassing)} rawValue={totalPassing} color="#0D9C29" higherIsBetter />
-        <KpiCard label="Web apps missing ≥ 1 budget" value={String(totalFailing)} rawValue={totalFailing} color="#C21930" />
+        <KpiCard label="Web apps meeting all budgets" value={String(totalPassing)} rawValue={totalPassing} color="#0D9C29" higherIsBetter sparkline={spk?.apdex} />
+        <KpiCard label="Web apps missing ≥ 1 budget" value={String(totalFailing)} rawValue={totalFailing} color="#C21930" sparkline={spk?.errorRate} />
       </div>
 
       <SectionCard title="Performance budgets" subtitle="Adjust each budget below. All rows re-evaluate live.">

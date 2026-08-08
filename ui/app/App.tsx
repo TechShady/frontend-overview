@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Page } from "@dynatrace/strato-components-preview/layouts";
 import { Tabs, Tab } from "@dynatrace/strato-components-preview/navigation";
 import { Flex } from "@dynatrace/strato-components/layouts";
@@ -90,6 +91,45 @@ const AppHeader: React.FC<{
     refreshIntervalMs, setRefreshIntervalMs,
   } = useSettings();
   const tl = useTimelapse();
+
+  // Hotness diagnosis panel — draggable, portaled to body.
+  const [tlDiagPanel, setTlDiagPanel] = useState<{ pos: { x: number; y: number } } | null>(null);
+  const tlDiagDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const startTlDiagDrag = useCallback((e: React.MouseEvent) => {
+    if (!tlDiagPanel) return;
+    tlDiagDragRef.current = { startX: e.clientX, startY: e.clientY, origX: tlDiagPanel.pos.x, origY: tlDiagPanel.pos.y };
+    const move = (me: MouseEvent) => {
+      if (!tlDiagDragRef.current) return;
+      setTlDiagPanel({ pos: { x: tlDiagDragRef.current.origX + me.clientX - tlDiagDragRef.current.startX, y: tlDiagDragRef.current.origY + me.clientY - tlDiagDragRef.current.startY } });
+    };
+    const up = () => { tlDiagDragRef.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }, [tlDiagPanel]);
+  useEffect(() => { if (!tl.enabled) setTlDiagPanel(null); }, [tl.enabled]);
+
+  // Baselines (mean/std) across all buckets for Z-score computation.
+  const tlBaselines = useMemo(() => {
+    const rows = tl.sharedMetricsAll;
+    if (rows.length < 2) return null;
+    const stat = (get: (r: SharedBucketMetrics) => number | null | undefined) => {
+      const vs = rows.map(get).filter((v): v is number => v != null && isFinite(v));
+      if (vs.length < 2) return { mean: 0, std: 1 };
+      const mean = vs.reduce((a, b) => a + b, 0) / vs.length;
+      const variance = vs.reduce((a, b) => a + (b - mean) ** 2, 0) / vs.length;
+      const std = Math.sqrt(variance) || 1;
+      return { mean, std };
+    };
+    return {
+      sessions: stat((r) => r.sessions),
+      errorRate: stat((r) => r.errorRate),
+      avgDurationMs: stat((r) => r.avgDurationMs),
+      lcp: stat((r) => r.lcp),
+      inp: stat((r) => r.inp),
+      cls: stat((r) => r.cls),
+      ttfb: stat((r) => r.ttfb),
+    };
+  }, [tl.sharedMetricsAll]);
 
   return (
     <div style={{
@@ -295,19 +335,94 @@ const AppHeader: React.FC<{
                     return (
                       <div
                         key={i}
-                        onClick={() => { tl.setPlaying(false); tl.setIndex(i); }}
-                        title={`bucket ${i + 1} · z=${v.toFixed(2)} · click to seek`}
+                        onClick={() => { tl.setPlaying(false); tl.setIndex(i); setTlDiagPanel(prev => ({ pos: prev?.pos ?? { x: 48, y: 260 } })); }}
+                        title={`bucket ${i + 1} · z=${v.toFixed(2)} · click to diagnose`}
                         style={{ flex: 1, height: h, background: color, opacity, borderRadius: 1, transition: "opacity 0.15s", outline: i === cursorIdx ? "1px solid rgba(255,255,255,0.85)" : "none" }}
                       />
                     );
                   })}
                 </div>
-                <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2, textAlign: "right" }}>Click a bar to seek</div>
+                <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2, textAlign: "right" }}>Click a bar to seek &amp; diagnose · drag panel to move</div>
               </div>
             );
           })()}
         </div>
       )}
+
+      {/* Hotness diagnosis panel — portaled to body so z-index is unconstrained */}
+      {tlDiagPanel && tlBaselines && tl.sharedMetricsAll.length > 0 && createPortal((() => {
+        const idx = Math.min(Math.max(tl.index, 0), tl.sharedMetricsAll.length - 1);
+        const row = tl.sharedMetricsAll[idx];
+        if (!row) return null;
+        // positive badnessZ = worse than mean; sessions is neutral
+        const bZ = (val: number, base: { mean: number; std: number }, lowerIsBetter: boolean) => {
+          const raw = (val - base.mean) / base.std;
+          return lowerIsBetter ? -raw : raw;
+        };
+        const metrics: { label: string; value: string; z: number; neutral: boolean; desc: string }[] = [
+          { label: "Sessions",     value: row.sessions.toLocaleString(),           z: (row.sessions - tlBaselines.sessions.mean) / tlBaselines.sessions.std, neutral: true,  desc: "traffic volume vs avg" },
+          { label: "Error Rate",   value: `${row.errorRate.toFixed(2)}%`,          z: bZ(row.errorRate, tlBaselines.errorRate, false),                       neutral: false, desc: "errors vs avg — ↑ bad" },
+          { label: "Avg Duration", value: `${Math.round(row.avgDurationMs)}ms`,    z: bZ(row.avgDurationMs, tlBaselines.avgDurationMs, false),               neutral: false, desc: "load time vs avg — ↑ bad" },
+          ...(row.lcp != null && tlBaselines.lcp.mean > 0 ? [{ label: "LCP", value: `${Math.round(row.lcp)}ms`, z: bZ(row.lcp, tlBaselines.lcp, false), neutral: false, desc: "paint time vs avg — ↑ bad" }] : []),
+          ...(row.inp != null && tlBaselines.inp.mean > 0 ? [{ label: "INP", value: `${Math.round(row.inp)}ms`, z: bZ(row.inp, tlBaselines.inp, false), neutral: false, desc: "input latency vs avg — ↑ bad" }] : []),
+          ...(row.cls != null && tlBaselines.cls.mean > 0 ? [{ label: "CLS", value: row.cls.toFixed(3), z: bZ(row.cls, tlBaselines.cls, false), neutral: false, desc: "layout shift vs avg — ↑ bad" }] : []),
+          ...(row.ttfb != null && tlBaselines.ttfb.mean > 0 ? [{ label: "TTFB", value: `${Math.round(row.ttfb)}ms`, z: bZ(row.ttfb, tlBaselines.ttfb, false), neutral: false, desc: "server latency vs avg — ↑ bad" }] : []),
+        ];
+        const hotZ = tl.hotness[idx] ?? 0;
+        const hotColor = hotZ >= 2.5 ? TL_HOT_HIGH : hotZ >= 1.5 ? TL_HOT_WARM : hotZ >= 0.75 ? TL_HOT_ELEV : "#4589FF";
+        const mColor = (m: typeof metrics[0]) => {
+          if (m.neutral) return Math.abs(m.z) >= 1.5 ? TL_HOT_WARM : "#4589FF";
+          if (m.z <= 0) return "#0D9C29";
+          return m.z >= 2.5 ? TL_HOT_HIGH : m.z >= 1.5 ? TL_HOT_WARM : m.z >= 0.75 ? TL_HOT_ELEV : "#0D9C29";
+        };
+        const bad = metrics.filter(m => !m.neutral && m.z >= 0.75).sort((a, b) => b.z - a.z);
+        const sessM = metrics[0];
+        let driver = "";
+        if (bad.length === 0 && Math.abs(sessM.z) < 0.75) driver = "Within normal range";
+        else if (Math.abs(sessM.z) >= 1.5 && (bad.length === 0 || Math.abs(sessM.z) > bad[0].z)) driver = sessM.z > 0 ? "Traffic surge" : "Traffic drop";
+        else if (bad[0]?.label === "Error Rate") driver = "Error storm";
+        else if (bad[0]?.label === "Avg Duration" || bad[0]?.label === "LCP") driver = "Performance regression";
+        else if (bad[0]) driver = `${bad[0].label} anomaly`;
+        const driverColor = driver === "Within normal range" ? "#0D9C29" : bad[0]?.z >= 2.5 ? TL_HOT_HIGH : bad[0]?.z >= 1.5 ? TL_HOT_WARM : TL_HOT_ELEV;
+
+        return (
+          <div style={{ position: "fixed", left: tlDiagPanel.pos.x, top: tlDiagPanel.pos.y, width: 290, background: "var(--dt-colors-background-base-default,#0f1428)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 8, boxShadow: "0 8px 32px rgba(0,0,0,0.55)", zIndex: 600, userSelect: "none", fontSize: 12 }}>
+            <div onMouseDown={startTlDiagDrag} style={{ padding: "7px 10px", borderBottom: "1px solid rgba(128,128,128,0.2)", cursor: "grab", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(128,128,128,0.07)", borderRadius: "8px 8px 0 0" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85 }}>Bucket {idx + 1} · Why is this hot?</span>
+              <button onClick={() => setTlDiagPanel(null)} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", opacity: 0.5, fontSize: 15, padding: "0 2px", lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ padding: "7px 10px", borderBottom: "1px solid rgba(128,128,128,0.12)" }}>
+              <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 3, fontFamily: "monospace" }}>{row.bucket}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: hotColor }}>Hotness Z = {hotZ.toFixed(2)}</span>
+                {driver && <span style={{ fontSize: 10, fontWeight: 600, color: driverColor, background: `${driverColor}18`, border: `1px solid ${driverColor}40`, borderRadius: 4, padding: "1px 6px" }}>{driver}</span>}
+              </div>
+            </div>
+            <div style={{ padding: "6px 0 4px" }}>
+              {metrics.map(m => {
+                const col = mColor(m);
+                const barW = Math.min(100, Math.abs(m.z) / 3 * 100);
+                return (
+                  <div key={m.label} style={{ padding: "3px 10px 5px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, opacity: 0.8 }}>{m.label}</span>
+                      <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                        <span style={{ fontSize: 11, fontFamily: "monospace", opacity: 0.6 }}>{m.value}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: col, fontFamily: "monospace", minWidth: 54, textAlign: "right" }}>{m.z >= 0 ? "+" : ""}{m.z.toFixed(2)}z</span>
+                      </div>
+                    </div>
+                    <div style={{ height: 3, background: "rgba(128,128,128,0.12)", borderRadius: 2 }}>
+                      <div style={{ height: "100%", width: `${barW}%`, background: col, borderRadius: 2, transition: "width 0.2s" }} />
+                    </div>
+                    <div style={{ fontSize: 9, opacity: 0.35, marginTop: 1 }}>{m.desc}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ padding: "5px 10px", borderTop: "1px solid rgba(128,128,128,0.12)", fontSize: 9, opacity: 0.35 }}>Drag header · panel tracks current bucket</div>
+          </div>
+        );
+      })(), document.body)}
     </div>
   );
 };

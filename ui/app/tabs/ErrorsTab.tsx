@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Errors & Reliability tab
@@ -13,11 +15,14 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const ErrorsTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
   const perApp = useDql(errorsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(errorsPerAppQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const jsErrs = useDql(jsErrorsQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const errBucketed = useDql(errorsBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const errBucketed = useDql(errorsBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const rows = useMemo(() =>
     (perApp.data?.records ?? []).map((r: any) => ({
@@ -133,13 +138,13 @@ export const ErrorsTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Total errors" value={fmt.num(totalErrs)} rawValue={totalErrs} prevRawValue={prevTotalErrs} color="#C21930" />
+        <KpiCard label="Total errors" value={fmt.num(totalErrs)} rawValue={totalErrs} prevRawValue={prevTotalErrs} color="#C21930" sparkline={spk?.errors} />
         <KpiCard label="Overall error rate" value={fmt.pct(totalActions > 0 ? (totalErrs / totalActions) * 100 : 0)}
           rawValue={totalActions > 0 ? (totalErrs / totalActions) * 100 : 0}
           prevRawValue={prevTotalActions > 0 ? (prevTotalErrs / prevTotalActions) * 100 : null}
-          color="#C21930" />
-        <KpiCard label="Worst web app" value={worst?.application ?? "—"} subtext={worst ? `${fmt.pct(worst.errorRate)} error rate` : ""} color="#FF832B" />
-        <KpiCard label="Unique JS errors" value={fmt.num(topJsErrors.length)} rawValue={topJsErrors.length} color="#A56EFF" />
+          color="#C21930" sparkline={spk?.errorRate} />
+        <KpiCard label="Worst web app" value={worst?.application ?? "—"} subtext={worst ? `${fmt.pct(worst.errorRate)} error rate` : ""} color="#FF832B" rawValue={worst?.errorRate} sparkline={spk?.errorRate} />
+        <KpiCard label="Unique JS errors" value={fmt.num(topJsErrors.length)} rawValue={topJsErrors.length} color="#A56EFF" sparkline={spk?.errors} />
       </div>
 
       <SectionCard title="Error rate — per Web App" subtitle="Which web app is failing the most? Sort by error rate to find highest-impact issues.">

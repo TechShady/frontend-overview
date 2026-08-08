@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useBucketedSums } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Navigation & Flows — top pages + page-to-page transitions per web app.
@@ -14,9 +16,12 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const NavigationFlowsTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
   const pages = useDql(topPagesQuery(timeframeDays, sel), [timeframeDays, sel]);
   const transitions = useDql(pageTransitionsQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const pageBucketed = useDql(pagesBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const pageBucketed = useDql(pagesBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const pageSpk = useBucketedSums(pageBucketed.data?.records, ["views", "errors"] as const);
   const [minTransitions, setMinTransitions] = useState(5);
 
   const pageRows = useMemo(() =>
@@ -115,9 +120,9 @@ export const NavigationFlowsTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Unique pages" value={fmt.num(uniquePages)} rawValue={uniquePages} color="#4589FF" />
-        <KpiCard label="Total page views" value={fmt.num(totalViews)} rawValue={totalViews} color="#08BDBA" />
-        <KpiCard label="Unique transitions" value={fmt.num(transitionRows.length)} rawValue={transitionRows.length} color="#A56EFF" />
+        <KpiCard label="Unique pages" value={fmt.num(uniquePages)} rawValue={uniquePages} color="#4589FF" sparkline={pageSpk?.views} />
+        <KpiCard label="Total page views" value={fmt.num(totalViews)} rawValue={totalViews} color="#08BDBA" sparkline={pageSpk?.views} />
+        <KpiCard label="Unique transitions" value={fmt.num(transitionRows.length)} rawValue={transitionRows.length} color="#A56EFF" sparkline={pageSpk?.views} />
       </div>
 
       <SectionCard title="Top pages per Web App" subtitle="Ranked by page views. Duration and error rate are per-page.">

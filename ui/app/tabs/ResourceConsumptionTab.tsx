@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Resource Consumption — the "who's eating the most bytes / requests" tab.
@@ -14,9 +16,12 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const ResourceConsumptionTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
   const consumption = useDql(resourceConsumptionQuery(timeframeDays, sel), [timeframeDays, sel]);
   const thirdParty = useDql(thirdPartyImpactQuery(timeframeDays, sel), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const rows = useMemo(() =>
     (consumption.data?.records ?? []).map((r: any) => ({
@@ -145,12 +150,12 @@ export const ResourceConsumptionTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Total bytes (fleet)" value={fmt.bytes(totalBytes)} rawValue={totalBytes} color="#FF832B" />
-        <KpiCard label="Total requests (fleet)" value={fmt.num(totalRequests)} rawValue={totalRequests} color="#A56EFF" />
-        <KpiCard label="Avg bytes / page" value={fmt.bytes(totalViews > 0 ? totalBytes / totalViews : 0)} rawValue={totalViews > 0 ? totalBytes / totalViews : 0} color="#4589FF" />
-        <KpiCard label="Heaviest web app" value={heaviest?.application ?? "—"} subtext={heaviest ? fmt.bytes(heaviest.totalBytes) : ""} color="#C21930" />
-        <KpiCard label="Chattiest web app" value={chattiest?.application ?? "—"} subtext={chattiest ? `${fmt.num(chattiest.totalRequests)} requests` : ""} color="#A56EFF" />
-        <KpiCard label="Worst avg page weight" value={worstAvg?.application ?? "—"} subtext={worstAvg ? fmt.bytes(worstAvg.avgBytesPerView) : ""} color="#FF832B" />
+        <KpiCard label="Total bytes (fleet)" value={fmt.bytes(totalBytes)} rawValue={totalBytes} color="#FF832B" sparkline={spk?.actions} />
+        <KpiCard label="Total requests (fleet)" value={fmt.num(totalRequests)} rawValue={totalRequests} color="#A56EFF" sparkline={spk?.actions} />
+        <KpiCard label="Avg bytes / page" value={fmt.bytes(totalViews > 0 ? totalBytes / totalViews : 0)} rawValue={totalViews > 0 ? totalBytes / totalViews : 0} color="#4589FF" sparkline={spk?.sessions} />
+        <KpiCard label="Heaviest web app" value={heaviest?.application ?? "—"} subtext={heaviest ? fmt.bytes(heaviest.totalBytes) : ""} color="#C21930" rawValue={heaviest?.totalBytes} sparkline={spk?.actions} />
+        <KpiCard label="Chattiest web app" value={chattiest?.application ?? "—"} subtext={chattiest ? `${fmt.num(chattiest.totalRequests)} requests` : ""} color="#A56EFF" rawValue={chattiest?.totalRequests} sparkline={spk?.actions} />
+        <KpiCard label="Worst avg page weight" value={worstAvg?.application ?? "—"} subtext={worstAvg ? fmt.bytes(worstAvg.avgBytesPerView) : ""} color="#FF832B" rawValue={worstAvg?.avgBytesPerView} sparkline={spk?.sessions} />
       </div>
 
       <SectionCard

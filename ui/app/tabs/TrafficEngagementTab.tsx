@@ -6,6 +6,8 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
+import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
 // Traffic & Engagement — sessions, users, bounce, session duration per web app.
@@ -13,9 +15,12 @@ import { useBucketedRanks } from "../hooks/useBucketedRanks";
 export const TrafficEngagementTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const sel = webAppFilter.selected;
+  const tl = useTimelapse();
+  const bucketLabel = tl.enabled ? tl.bucket : undefined;
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
-  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const spk = useFleetSparklines(bucketed.data?.records);
 
   const rows = useMemo(() =>
     (sum.data?.records ?? []).map((r: any) => ({
@@ -91,9 +96,9 @@ export const TrafficEngagementTab: React.FC = () => {
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
-        <KpiCard label="Total sessions" value={fmt.num(totalSessions)} rawValue={totalSessions} prevRawValue={prevSessions} color="#4589FF" higherIsBetter />
-        <KpiCard label="Total users" value={fmt.num(totalUsers)} rawValue={totalUsers} prevRawValue={prevUsers} color="#08BDBA" higherIsBetter />
-        <KpiCard label="Busiest web app" value={busiest?.application ?? "—"} subtext={busiest ? `${fmt.num(busiest.sessions)} sessions` : ""} color="#A56EFF" />
+        <KpiCard label="Total sessions" value={fmt.num(totalSessions)} rawValue={totalSessions} prevRawValue={prevSessions} color="#4589FF" higherIsBetter sparkline={spk?.sessions} />
+        <KpiCard label="Total users" value={fmt.num(totalUsers)} rawValue={totalUsers} prevRawValue={prevUsers} color="#08BDBA" higherIsBetter sparkline={spk?.users} />
+        <KpiCard label="Busiest web app" value={busiest?.application ?? "—"} subtext={busiest ? `${fmt.num(busiest.sessions)} sessions` : ""} color="#A56EFF" rawValue={busiest?.sessions} sparkline={spk?.sessions} />
       </div>
 
       <SectionCard title="Traffic & engagement — per Web App">
