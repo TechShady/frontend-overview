@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { Page } from "@dynatrace/strato-components-preview/layouts";
 import { Tabs, Tab } from "@dynatrace/strato-components-preview/navigation";
 import { Flex } from "@dynatrace/strato-components/layouts";
@@ -7,15 +7,20 @@ import { Button } from "@dynatrace/strato-components/buttons";
 import { Sheet } from "@dynatrace/strato-components/overlays";
 import { Select } from "@dynatrace/strato-components/forms";
 import { Switch } from "@dynatrace/strato-components/forms";
+import { TimeframeSelector } from "@dynatrace/strato-components/filters";
+import type { Timeframe } from "@dynatrace/strato-components/core";
 
 import {
   SettingsProvider, useSettings,
   TIMEFRAME_OPTIONS, REFRESH_OPTIONS, ALL_TABS,
+  setQueryAnchorMs,
 } from "./SettingsContext";
-import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS } from "./TimelapseContext";
+import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, SharedBucketMetrics } from "./TimelapseContext";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { useDql } from "./useDql";
-import { webAppInventoryQuery } from "./queries";
+import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
+import { ForecastProvider, ForecastOpener } from "./components/KpiCard";
+import { ForecastModal } from "./components/ForecastModal";
 import appConfig from "../../app.config.json";
 
 import { ExecutiveSummaryTab } from "./tabs/ExecutiveSummaryTab";
@@ -31,6 +36,28 @@ import { HyperlyzerTab } from "./tabs/HyperlyzerTab";
 import { ProblemsTab } from "./tabs/ProblemsTab";
 
 const APP_VERSION_LABEL = appConfig.app.version;
+
+// Hotness palette (matches user-journey-app)
+const TL_HOT_ELEV = "#FFF04D";
+const TL_HOT_WARM = "#FF3D9A";
+const TL_HOT_HIGH = "#FF073A";
+
+// Convert a Strato Timeframe selection to a "days" duration.
+function timeframeToDays(tf: Timeframe | null): number | null {
+  if (!tf?.from?.absoluteDate || !tf?.to?.absoluteDate) return null;
+  const fromMs = Date.parse(tf.from.absoluteDate);
+  const toMs = Date.parse(tf.to.absoluteDate);
+  if (!isFinite(fromMs) || !isFinite(toMs) || toMs <= fromMs) return null;
+  return (toMs - fromMs) / 86400000;
+}
+// Anchor (epoch ms) for shifted windows; null when "live".
+function timeframeAnchorMs(tf: Timeframe | null): number | null {
+  if (!tf?.to?.absoluteDate) return null;
+  const toMs = Date.parse(tf.to.absoluteDate);
+  if (!isFinite(toMs)) return null;
+  if (Math.abs(Date.now() - toMs) < 60_000) return null;
+  return toMs;
+}
 
 const TAB_COMPONENTS: Record<string, React.FC> = {
   "Executive Summary": ExecutiveSummaryTab,
@@ -55,9 +82,10 @@ const AppHeader: React.FC<{
   aiOpen: boolean;
   onToggleAI: () => void;
   webApps: { name: string; sessions: number }[];
-}> = ({ onOpenHelp, onOpenSettings, aiOpen, onToggleAI, webApps }) => {
+  timeframeRaw: Timeframe | null;
+  onChangeTimeframe: (tf: Timeframe | null) => void;
+}> = ({ onOpenHelp, onOpenSettings, aiOpen, onToggleAI, webApps, timeframeRaw, onChangeTimeframe }) => {
   const {
-    timeframeDays, setTimeframeDays,
     webAppFilter, setWebAppFilter,
     refreshIntervalMs, setRefreshIntervalMs,
   } = useSettings();
@@ -96,21 +124,11 @@ const AppHeader: React.FC<{
         </div>
 
         <Strong style={{ fontSize: 12 }}>Timeframe</Strong>
-        <div style={{ minWidth: 170 }}>
-          <Select
-            name="timeframe"
-            value={String(timeframeDays)}
-            onChange={(v: any) => {
-              const first = Array.isArray(v) ? v[0] : v;
-              if (first != null) setTimeframeDays(Number(first));
-            }}
-          >
-            <Select.Content>
-              {TIMEFRAME_OPTIONS.map((tf) => (
-                <Select.Option key={tf.value} value={String(tf.value)}>{tf.label}</Select.Option>
-              ))}
-            </Select.Content>
-          </Select>
+        <div style={{ minWidth: 280 }}>
+          <TimeframeSelector
+            value={timeframeRaw ?? { from: "now()-24h", to: "now()" }}
+            onChange={onChangeTimeframe}
+          />
         </div>
 
         <label
@@ -247,6 +265,47 @@ const AppHeader: React.FC<{
               <span style={{ fontSize: 11, opacity: 0.55, fontFamily: "monospace" }}>{tl.currentBucketKey}</span>
             )}
           </Flex>
+
+          {/* Shared hotness strip — Z-score of shared metrics per bucket */}
+          {tl.hotness.length > 0 && (() => {
+            const stripH = 26;
+            const maxHot = Math.max(0.5, ...tl.hotness);
+            const bars = tl.hotness;
+            const cursorIdx = Math.min(tl.index, Math.max(0, bars.length - 1));
+            return (
+              <div style={{ marginTop: 8, padding: "6px 4px 4px", borderTop: "1px solid rgba(69,137,255,0.15)" }}>
+                <Flex alignItems="center" justifyContent="space-between" style={{ marginBottom: 4 }}>
+                  <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                    Hotness · {tl.hotnessSource || "signal"}
+                  </span>
+                  <Flex alignItems="center" gap={8}>
+                    <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: "#4589FF", borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Normal</span>
+                    <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: TL_HOT_ELEV, borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Elevated</span>
+                    <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: TL_HOT_WARM, borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Warm</span>
+                    <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: TL_HOT_HIGH, borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Spike</span>
+                    <span style={{ fontSize: 10, opacity: 0.55, fontFamily: "monospace" }}>peak z={maxHot.toFixed(1)}</span>
+                  </Flex>
+                </Flex>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 1, height: stripH, cursor: "pointer" }}>
+                  {bars.map((v, i) => {
+                    const norm = Math.min(1, v / maxHot);
+                    const color = v >= 2.5 ? TL_HOT_HIGH : v >= 1.5 ? TL_HOT_WARM : v >= 0.75 ? TL_HOT_ELEV : "#4589FF";
+                    const opacity = i === cursorIdx ? 1 : 0.65;
+                    const h = Math.max(2, norm * stripH);
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => { tl.setPlaying(false); tl.setIndex(i); }}
+                        title={`bucket ${i + 1} · z=${v.toFixed(2)} · click to seek`}
+                        style={{ flex: 1, height: h, background: color, opacity, borderRadius: 1, transition: "opacity 0.15s", outline: i === cursorIdx ? "1px solid rgba(255,255,255,0.85)" : "none" }}
+                      />
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2, textAlign: "right" }}>Click a bar to seek</div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -383,11 +442,14 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
 // Main shell
 // ---------------------------------------------------------------------------
 const AppInner: React.FC = () => {
-  const { tabVisibility, timeframeDays, refreshIntervalMs } = useSettings();
+  const { tabVisibility, timeframeDays, setTimeframeDays, webAppFilter, refreshIntervalMs } = useSettings();
   const [tab, setTab] = useState<number>(0);
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [timeframeRaw, setTimeframeRaw] = useState<Timeframe | null>(null);
+  const [forecastModal, setForecastModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
+  const tl = useTimelapse();
 
   // Metric-stream key — bump periodically to force query refetch
   const [streamKey, setStreamKey] = useState(0);
@@ -410,6 +472,89 @@ const AppInner: React.FC = () => {
     if (tab >= visibleTabs.length && visibleTabs.length > 0) setTab(0);
   }, [visibleTabs.length]);
 
+  // ---- Shared Time-Lapse metrics publisher ----
+  // When TL is enabled, fetch per-bucket shared metrics and publish to context
+  // so every tab can see the same bucket cursor + hotness strip renders.
+  const tlBucketLabel = tl.bucket; // "1m"|"5m"|"10m"|"30m"|"1h" — DQL valid
+  const sharedTlQuery = tl.enabled
+    ? sharedTimelapseMetricsQuery(timeframeDays, webAppFilter.selected, tlBucketLabel)
+    : null;
+  const sharedTl = useDql(sharedTlQuery, [timeframeDays, webAppFilter.selected, tlBucketLabel, tl.enabled, streamKey]);
+
+  // Parse records → SharedBucketMetrics[] and publish
+  useEffect(() => {
+    if (!tl.enabled) {
+      tl.reportSharedMetrics([]);
+      tl.reportBuckets(0);
+      tl.reportHotness([]);
+      return;
+    }
+    const recs = sharedTl.data?.records ?? [];
+    if (recs.length === 0) {
+      tl.reportSharedMetrics([]);
+      tl.reportBuckets(0);
+      tl.reportHotness([]);
+      return;
+    }
+    const bucketMs = TL_BUCKET_MS[tl.bucket] ?? 300000;
+    const parsed: SharedBucketMetrics[] = recs.map((r: any) => {
+      const bucketStr = String(r.bkt ?? "");
+      const fromMs = Date.parse(bucketStr) || 0;
+      return {
+        bucket: bucketStr,
+        fromMs,
+        toMs: fromMs + bucketMs,
+        sessions: Number(r.sessions ?? 0),
+        totalActions: Number(r.totalActions ?? 0),
+        avgDurationMs: Number(r.avgDurationMs ?? 0),
+        errorCount: Number(r.errorCount ?? 0),
+        errorRate: Number(r.errorRate ?? 0),
+        lcp: r.lcp != null ? Number(r.lcp) : null,
+        cls: r.cls != null ? Number(r.cls) : null,
+        inp: r.inp != null ? Number(r.inp) : null,
+        ttfb: r.ttfb != null ? Number(r.ttfb) : null,
+      };
+    });
+    tl.reportSharedMetrics(parsed);
+    tl.reportBuckets(parsed.length, parsed[Math.min(tl.index, parsed.length - 1)]?.bucket);
+
+    // Baselines: mean + std per metric
+    const stats = (vals: number[]) => {
+      const clean = vals.filter((v) => isFinite(v));
+      if (clean.length < 2) return { mean: 0, std: 1 };
+      const mean = clean.reduce((a, b) => a + b, 0) / clean.length;
+      const variance = clean.reduce((a, v) => a + (v - mean) ** 2, 0) / clean.length;
+      return { mean, std: Math.max(1e-6, Math.sqrt(variance)) };
+    };
+    const errBase = stats(parsed.map((p) => p.errorRate));
+    const durBase = stats(parsed.map((p) => p.avgDurationMs));
+    const lcpBase = stats(parsed.map((p) => p.lcp ?? 0).filter((v) => v > 0));
+    // Z-score per bucket: max(errZ, durZ, lcpZ). Only positive deviation = hot.
+    const hot = parsed.map((p) => {
+      const errZ = errBase.std > 0 ? (p.errorRate - errBase.mean) / errBase.std : 0;
+      const durZ = durBase.std > 0 ? (p.avgDurationMs - durBase.mean) / durBase.std : 0;
+      const lcpZ = lcpBase.std > 0 && p.lcp != null ? (p.lcp - lcpBase.mean) / lcpBase.std : 0;
+      return Math.max(0, errZ, durZ, lcpZ);
+    });
+    tl.reportHotness(hot, "Shared KPIs Z-score");
+  }, [tl.enabled, sharedTl.data, tl.bucket]);
+
+  const openForecast = useCallback<ForecastOpener>((label, sparkline, color) => {
+    if (sparkline && sparkline.length > 1) setForecastModal({ label, sparkline, color });
+  }, []);
+
+  const anchor = timeframeAnchorMs(timeframeRaw);
+  const tfDurMs = timeframeDays * 86400000;
+  const fromMs = (anchor ?? Date.now()) - tfDurMs;
+  const toMs = anchor ?? Date.now();
+
+  const handleTimeframeChange = useCallback((tf: Timeframe | null) => {
+    setTimeframeRaw(tf);
+    const d = timeframeToDays(tf);
+    if (d != null) setTimeframeDays(d);
+    setQueryAnchorMs(timeframeAnchorMs(tf));
+  }, [setTimeframeDays]);
+
   return (
     <>
       <AppHeader
@@ -418,30 +563,46 @@ const AppInner: React.FC = () => {
         aiOpen={aiOpen}
         onToggleAI={() => setAiOpen((v) => !v)}
         webApps={webApps}
+        timeframeRaw={timeframeRaw}
+        onChangeTimeframe={handleTimeframeChange}
       />
-      <div style={{ padding: "0 8px" }}>
-        {visibleTabs.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", opacity: 0.6 }}>
-            <Paragraph>All tabs are hidden. Open <Strong>Settings</Strong> to enable one.</Paragraph>
-            <Button variant="emphasized" onClick={() => setShowSettings(true)}>Open Settings</Button>
-          </div>
-        ) : (
-          <Tabs selectedIndex={tab} onChange={(i: any) => setTab(Number(i) || 0)}>
-            {visibleTabs.map((name) => {
-              const Comp = TAB_COMPONENTS[name];
-              return (
-                <Tab key={name} title={name}>
-                  {Comp ? <Comp /> : <Paragraph>Unknown tab</Paragraph>}
-                </Tab>
-              );
-            })}
-          </Tabs>
-        )}
-      </div>
+      <ForecastProvider value={openForecast}>
+        <div style={{ padding: "0 8px" }}>
+          {visibleTabs.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", opacity: 0.6 }}>
+              <Paragraph>All tabs are hidden. Open <Strong>Settings</Strong> to enable one.</Paragraph>
+              <Button variant="emphasized" onClick={() => setShowSettings(true)}>Open Settings</Button>
+            </div>
+          ) : (
+            <Tabs selectedIndex={tab} onChange={(i: any) => setTab(Number(i) || 0)}>
+              {visibleTabs.map((name) => {
+                const Comp = TAB_COMPONENTS[name];
+                return (
+                  <Tab key={name} title={name}>
+                    {Comp ? <Comp /> : <Paragraph>Unknown tab</Paragraph>}
+                  </Tab>
+                );
+              })}
+            </Tabs>
+          )}
+        </div>
+      </ForecastProvider>
 
       <HelpSheet show={showHelp} onDismiss={() => setShowHelp(false)} />
       <SettingsSheet show={showSettings} onDismiss={() => setShowSettings(false)} />
       <AIAssistSheet show={aiOpen} onDismiss={() => setAiOpen(false)} webApps={webApps} />
+
+      {forecastModal && (
+        <ForecastModal
+          label={forecastModal.label}
+          sparkline={forecastModal.sparkline}
+          color={forecastModal.color}
+          fromMs={fromMs}
+          toMs={toMs}
+          onClose={() => setForecastModal(null)}
+          getRequeryData={async () => forecastModal.sparkline}
+        />
+      )}
     </>
   );
 };

@@ -1,62 +1,84 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Text, Heading } from "@dynatrace/strato-components/typography";
+import { ProgressCircle } from "@dynatrace/strato-components/content";
+import "./kpi-card.css";
 
 // ---------------------------------------------------------------------------
-// KPI Card with sparkline, comparison arrow, and click-to-forecast modal.
-// Ported / expanded from the user-journey-app KPI treatment.
+// KPI Card — direct port from user-journey-app.
+// Provides KpiSparkline, KpiPanelOverlay (impact/anomaly/attribution),
+// ForecastContext/Provider, and KpiCard with dropdown menu.
 // ---------------------------------------------------------------------------
 
-export type RelatedMetric = { label: string; value: string; color?: string };
+const GREEN = "#0D9C29";
+const YELLOW = "#B8860B";
+const RED = "#C21930";
 
-export type KpiCardProps = {
+export type ForecastOpener = (label: string, sparkline: number[], color?: string) => void;
+export const ForecastContext = React.createContext<ForecastOpener | null>(null);
+export const ForecastProvider = ForecastContext.Provider;
+
+// ---------------------------------------------------------------------------
+// Related-metrics correlations panel (minimal port).
+// ---------------------------------------------------------------------------
+export interface RelatedMetricEntry {
   label: string;
-  value: string;
-  rawValue?: number;
-  prevRawValue?: number | null;
-  sparkline?: number[];
+  sparkline: number[];
   color?: string;
-  suffix?: string;
-  higherIsBetter?: boolean;
-  subtext?: string;
-  loading?: boolean;
-  format?: (n: number) => string;
-  unit?: string;
-  related?: RelatedMetric[];
-  description?: string;
-};
+  inverted?: boolean;
+}
+export type CorrelationOpener = (target: RelatedMetricEntry) => void;
+export const CorrelationsContext = React.createContext<{
+  registry: RelatedMetricEntry[];
+  register: (metrics: RelatedMetricEntry[]) => void;
+  open: CorrelationOpener;
+} | null>(null);
 
-// -- Sparkline component ----------------------------------------------------
-function KpiSparkline({ data, color = "#4589FF", height = 30, format }: { data: number[]; color?: string; height?: number; format?: (n: number) => string }) {
-  const VW = 200, H = height;
+// ---------------------------------------------------------------------------
+// Interactive sparkline with hover crosshair + value tooltip
+// ---------------------------------------------------------------------------
+export function KpiSparkline({ data, color = "#4589FF" }: { data: number[]; color?: string }) {
+  const VW = 200, H = 34;
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const valid = data.filter((v) => v != null && isFinite(v));
+  const trimmed = data.length > 2 ? data.slice(0, -1) : data;
+  const valid = trimmed.filter((v) => v != null && !isNaN(v) && isFinite(v));
   if (valid.length < 2) return null;
-  const min = Math.min(...valid);
-  const max = Math.max(...valid);
+  const TARGET = 30;
+  const interp: number[] = valid.length >= TARGET ? valid : Array.from({ length: TARGET }, (_, i) => {
+    const t = i / (TARGET - 1);
+    const srcIdx = t * (valid.length - 1);
+    const lo = Math.floor(srcIdx);
+    const hi = Math.min(lo + 1, valid.length - 1);
+    return valid[lo] * (1 - (srcIdx - lo)) + valid[hi] * (srcIdx - lo);
+  });
+  const min = Math.min(...interp);
+  const max = Math.max(...interp);
   const range = max - min || 1;
-  const points = valid.map((v, i) => ({
-    x: (i / (valid.length - 1)) * VW,
+  const points = interp.map((v, i) => ({
+    x: (i / (interp.length - 1)) * VW,
     y: H - ((v - min) / range) * (H - 4) - 2,
     value: v,
   }));
   const pts = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const fillPts = `0,${H} ${pts} ${VW},${H}`;
-  const fmt = format ?? ((n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(n % 1 === 0 ? 0 : 1)));
 
-  const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * VW;
-    const idx = Math.round((x / VW) * (valid.length - 1));
-    setHoverIdx(Math.max(0, Math.min(valid.length - 1, idx)));
+    const idx = Math.round((x / VW) * (interp.length - 1));
+    setHoverIdx(Math.max(0, Math.min(interp.length - 1, idx)));
   };
+
+  const hoverPct = hoverIdx !== null ? (points[hoverIdx].x / VW) * 100 : 0;
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
       <svg
         viewBox={`0 0 ${VW} ${H}`}
         preserveAspectRatio="none"
-        style={{ display: "block", width: "100%", height: H, marginTop: 4, opacity: 0.9, cursor: "crosshair" }}
-        onMouseMove={handleMove}
+        style={{ display: "block", width: "100%", height: H, marginTop: 4, opacity: 0.85, cursor: "crosshair" }}
+        aria-hidden
+        onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverIdx(null)}
       >
         <polygon points={fillPts} fill={color} fillOpacity={0.12} />
@@ -70,268 +92,280 @@ function KpiSparkline({ data, color = "#4589FF", height = 30, format }: { data: 
         )}
       </svg>
       {hoverIdx !== null && points[hoverIdx] && (
-        <div style={{ position: "absolute", bottom: H + 4, left: `${(points[hoverIdx].x / VW) * 100}%`, transform: "translateX(-50%)", background: "rgba(0,0,0,0.85)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none" }}>
-          {fmt(points[hoverIdx].value)}
+        <div style={{ position: "absolute", bottom: H + 6, left: `${Math.max(5, Math.min(hoverPct, 75))}%`, background: "rgba(0,0,0,0.85)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "3px 6px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none", zIndex: 10, transform: "translateX(-50%)" }}>
+          {points[hoverIdx].value >= 1000 ? `${(points[hoverIdx].value / 1000).toFixed(1)}k` : points[hoverIdx].value.toFixed(points[hoverIdx].value % 1 === 0 ? 0 : 1)}
         </div>
       )}
     </div>
   );
 }
 
-// -- Forecast: linear regression on sparkline -------------------------------
-function linearForecast(data: number[], stepsAhead: number): number[] {
-  const valid = data.filter((v) => v != null && isFinite(v));
-  if (valid.length < 2) return [];
-  const n = valid.length;
-  const xMean = (n - 1) / 2;
-  const yMean = valid.reduce((a, b) => a + b, 0) / n;
-  let num = 0, den = 0;
-  for (let i = 0; i < n; i++) { num += (i - xMean) * (valid[i] - yMean); den += (i - xMean) ** 2; }
-  const slope = den !== 0 ? num / den : 0;
-  const intercept = yMean - slope * xMean;
-  const out: number[] = [];
-  for (let i = 0; i < stepsAhead; i++) out.push(Math.max(0, intercept + slope * (n + i)));
-  return out;
-}
-
-// -- Detail modal ------------------------------------------------------------
-function KpiDetailModal({
-  show, onClose, label, value, color, sparkline, prevRawValue, rawValue,
-  delta, higherIsBetter, related, description, format, unit,
-}: {
-  show: boolean; onClose: () => void; label: string; value: string; color: string;
-  sparkline?: number[]; prevRawValue?: number | null; rawValue?: number;
-  delta: number | null; higherIsBetter: boolean; related?: RelatedMetric[]; description?: string;
-  format?: (n: number) => string; unit?: string;
+// ---------------------------------------------------------------------------
+// Impact / Anomaly / Change-attribution overlay panels
+// ---------------------------------------------------------------------------
+function KpiPanelOverlay({ label, rawValue, sparkline, color, panel, onClose, effectiveHigherIsBetter }: {
+  label: string; rawValue?: number; sparkline?: number[]; color?: string;
+  panel: "impact" | "anomaly" | "attribution"; onClose: () => void; effectiveHigherIsBetter: boolean;
 }) {
-  useEffect(() => {
-    if (!show) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [show, onClose]);
+  const valid = (sparkline ?? []).filter((v) => isFinite(v) && v != null);
+  const mean = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
+  const std = valid.length > 1 ? Math.sqrt(valid.reduce((a, v) => a + (v - mean) ** 2, 0) / valid.length) : 0;
+  const curr = rawValue ?? 0;
+  const deviation = std > 0 ? (curr - mean) / std : 0;
+  const pMin = valid.length ? Math.min(...valid) : 0;
+  const pMax = valid.length ? Math.max(...valid) : 0;
+  const lastFew = valid.slice(-4);
+  const recentTrend = lastFew.length >= 2 ? (lastFew[lastFew.length - 1] - lastFew[0]) / (lastFew[0] || 1) * 100 : 0;
+  const trendLabel = Math.abs(recentTrend) < 3 ? "Stable" : recentTrend > 0 ? (effectiveHigherIsBetter ? "Improving ↑" : "Worsening ↑") : (effectiveHigherIsBetter ? "Declining ↓" : "Improving ↓");
+  const cv = mean > 0 ? std / Math.abs(mean) : 0;
+  const stabilityLabel = cv < 0.05 ? "Very stable" : cv < 0.15 ? "Stable" : cv < 0.3 ? "Moderate variability" : "High variability";
+  const anomalyStatus = Math.abs(deviation) < 1 ? { label: "Normal", color: "#0D9C29" } : Math.abs(deviation) < 2 ? { label: "Slightly elevated", color: "#FFC800" } : { label: "Anomalous", color: "#E00000" };
+  const fmt = (v: number) => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v >= 10 ? v.toFixed(0) : v.toFixed(2);
 
-  if (!show) return null;
-  const spark = sparkline ?? [];
-  const forecast = linearForecast(spark, Math.max(3, Math.floor(spark.length * 0.3)));
-  const fmt = format ?? ((n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(2)));
-  const trendLabel = forecast.length > 0 && spark.length > 0
-    ? forecast[forecast.length - 1] > spark[spark.length - 1] ? "rising" : forecast[forecast.length - 1] < spark[spark.length - 1] ? "falling" : "flat"
-    : "unknown";
-  const trendPct = forecast.length > 0 && spark.length > 0 && spark[spark.length - 1] !== 0
-    ? ((forecast[forecast.length - 1] - spark[spark.length - 1]) / Math.abs(spark[spark.length - 1])) * 100
-    : 0;
-  const trendGood = higherIsBetter ? trendPct > 0 : trendPct < 0;
-  const trendColor = trendLabel === "flat" ? "rgba(128,128,128,0.7)" : trendGood ? "#0D9C29" : "#C21930";
+  const titles: Record<string, string> = { impact: "👥 Impact Analysis", anomaly: "🔍 Anomaly Detection", attribution: "📋 Change Attribution" };
 
-  const overlay = (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, zIndex: 9999,
-        background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 660, maxWidth: "94vw", maxHeight: "90vh", overflow: "auto",
-          background: "rgba(24, 26, 40, 0.98)",
-          border: `1px solid ${color}55`,
-          borderRadius: 14,
-          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-          padding: 24, color: "#e9ecf5",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 99998, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "rgba(20,24,46,0.98)", border: `1px solid ${color ?? "#4589FF"}40`, borderRadius: 12, padding: "24px 28px", maxWidth: 480, width: "90vw", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
           <div>
-            <div style={{ fontSize: 11, textTransform: "uppercase", opacity: 0.65, letterSpacing: 0.6, fontWeight: 600 }}>{label}</div>
-            <div style={{ fontSize: 36, fontWeight: 700, color, marginTop: 4 }}>{value}</div>
-            {delta != null && (
-              <div style={{ fontSize: 13, marginTop: 4, color: (higherIsBetter ? delta > 0 : delta < 0) ? "#0D9C29" : Math.abs(delta) < 0.1 ? "rgba(128,128,128,0.7)" : "#C21930" }}>
-                {delta > 0 ? "▲" : delta < 0 ? "▼" : "—"} {Math.abs(delta).toFixed(1)}% vs previous period
-              </div>
-            )}
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>{titles[panel]}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{label}</div>
           </div>
-          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#e9ecf5", fontSize: 22, cursor: "pointer", opacity: 0.7 }}>×</button>
+          <button onClick={onClose} style={{ background: "rgba(128,128,128,0.2)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, color: "#fff", padding: "4px 10px", cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
 
-        {description && (
-          <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75, lineHeight: 1.5 }}>{description}</div>
-        )}
-
-        {/* Sparkline + forecast */}
-        {spark.length >= 2 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", opacity: 0.65, letterSpacing: 0.5, marginBottom: 6 }}>
-              History & Forecast
-              <span style={{ marginLeft: 10, fontWeight: 500, opacity: 0.9, color: trendColor, textTransform: "none", letterSpacing: 0 }}>
-                → projected {trendLabel} {trendPct !== 0 && `(${trendPct > 0 ? "+" : ""}${trendPct.toFixed(1)}%)`}
-              </span>
-            </div>
-            <ForecastChart history={spark} forecast={forecast} color={color} format={fmt} unit={unit} />
-            <div style={{ display: "flex", gap: 14, fontSize: 10, opacity: 0.65, marginTop: 4 }}>
-              <span><span style={{ display: "inline-block", width: 14, height: 2, background: color, verticalAlign: "middle", marginRight: 4 }} /> history ({spark.length} buckets)</span>
-              <span>
-                <span style={{ display: "inline-block", width: 14, height: 0, borderTop: `2px dashed ${color}`, verticalAlign: "middle", marginRight: 4 }} />
-                forecast ({forecast.length} buckets)
-              </span>
+        {panel === "impact" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              { label: "Current value", value: fmt(curr), col: color ?? "#4589FF" },
+              { label: "Peak (period)", value: fmt(pMax), col: "#0D9C29" },
+              { label: "Trough (period)", value: fmt(pMin), col: "#E00000" },
+              { label: "Mean (period)", value: fmt(mean), col: "rgba(255,255,255,0.7)" },
+              { label: "Recent trend", value: trendLabel, col: recentTrend > 0 && effectiveHigherIsBetter ? "#0D9C29" : recentTrend < 0 && !effectiveHigherIsBetter ? "#0D9C29" : Math.abs(recentTrend) < 3 ? "rgba(255,255,255,0.6)" : "#E00000" },
+              { label: "Data stability", value: stabilityLabel, col: "rgba(255,255,255,0.6)" },
+            ].map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{r.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: r.col }}>{r.value}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 6, padding: "10px 12px", background: "rgba(69,137,255,0.06)", borderRadius: 8, fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+              {effectiveHigherIsBetter ? `Higher ${label} positively impacts user outcomes.` : `Lower ${label} indicates a better user experience.`} Current value is {Math.abs(deviation) < 0.5 ? "within" : deviation > 0 ? "above" : "below"} the period mean.
             </div>
           </div>
         )}
 
-        {related && related.length > 0 && (
-          <div style={{ marginTop: 22 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", opacity: 0.65, letterSpacing: 0.5, marginBottom: 8 }}>Related Metrics</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-              {related.map((m, i) => (
-                <div key={i} style={{ padding: "10px 12px", background: "rgba(128,128,128,0.08)", border: "1px solid rgba(128,128,128,0.25)", borderRadius: 8 }}>
-                  <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.6, letterSpacing: 0.4 }}>{m.label}</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: m.color ?? "#e9ecf5", marginTop: 2 }}>{m.value}</div>
-                </div>
-              ))}
+        {panel === "anomaly" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+              <div style={{ textAlign: "center", padding: "12px 20px", borderRadius: 10, background: `${anomalyStatus.color}18`, border: `1px solid ${anomalyStatus.color}40` }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: anomalyStatus.color }}>{anomalyStatus.label}</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{Math.abs(deviation).toFixed(2)}σ from mean</div>
+              </div>
+            </div>
+            {[
+              { label: "Current value", value: fmt(curr), col: color ?? "#4589FF" },
+              { label: "Historical mean", value: fmt(mean), col: "rgba(255,255,255,0.7)" },
+              { label: "Std deviation (±1σ)", value: `±${fmt(std)}`, col: "rgba(255,255,255,0.6)" },
+              { label: "Normal range", value: `${fmt(Math.max(0, mean - std))} – ${fmt(mean + std)}`, col: "#0D9C29" },
+              { label: "Deviation", value: `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}σ`, col: anomalyStatus.color },
+            ].map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{r.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: r.col }}>{r.value}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 4, padding: "10px 12px", background: "rgba(69,137,255,0.06)", borderRadius: 8, fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+              {Math.abs(deviation) < 1 ? `${label} is behaving normally for this timeframe. No action needed.` : Math.abs(deviation) < 2 ? `${label} shows slight deviation. Monitor for continued movement.` : `${label} is significantly outside the normal range. Investigate potential causes.`}
             </div>
           </div>
         )}
 
-        {prevRawValue != null && rawValue != null && (
-          <div style={{ marginTop: 22, padding: "12px 14px", background: "rgba(128,128,128,0.08)", border: "1px solid rgba(128,128,128,0.25)", borderRadius: 8, display: "flex", gap: 24, fontSize: 13 }}>
-            <div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.6 }}>Previous period</div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>{fmt(prevRawValue)}{unit ?? ""}</div>
+        {panel === "attribution" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ padding: "10px 12px", background: "rgba(255,200,0,0.06)", border: "1px solid rgba(255,200,0,0.2)", borderRadius: 8, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.6 }}>
+              Automated change detection requires deployment event data from Dynatrace. This analysis provides statistical context for manual correlation.
             </div>
-            <div style={{ opacity: 0.35, fontSize: 22, alignSelf: "center" }}>→</div>
-            <div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.6 }}>Current</div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2, color }}>{fmt(rawValue)}{unit ?? ""}</div>
+            {[
+              { label: "Period stability", value: stabilityLabel, col: cv < 0.1 ? "#0D9C29" : cv < 0.25 ? "#FFC800" : "#E00000" },
+              { label: "Recent trend", value: trendLabel, col: "rgba(255,255,255,0.7)" },
+              { label: "Trend magnitude", value: `${recentTrend >= 0 ? "+" : ""}${recentTrend.toFixed(1)}%`, col: Math.abs(recentTrend) < 5 ? "rgba(255,255,255,0.5)" : "#FFC800" },
+              { label: "Value range (period)", value: `${fmt(pMin)} – ${fmt(pMax)}`, col: "rgba(255,255,255,0.6)" },
+            ].map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 8 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{r.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: r.col }}>{r.value}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 4, padding: "10px 12px", background: "rgba(69,137,255,0.06)", borderRadius: 8, fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+              To correlate with deployments: use the <strong style={{ color: "rgba(255,255,255,0.8)" }}>Change Intelligence</strong> tab or check Dynatrace Davis AI for automated root cause analysis.
             </div>
           </div>
         )}
       </div>
-    </div>
-  );
-
-  return createPortal(overlay, document.body);
-}
-
-function ForecastChart({ history, forecast, color, format, unit }: { history: number[]; forecast: number[]; color: string; format: (n: number) => string; unit?: string }) {
-  const W = 600, H = 180;
-  const all = [...history, ...forecast].filter((v) => v != null && isFinite(v));
-  if (all.length < 2) return null;
-  const min = Math.min(...all);
-  const max = Math.max(...all);
-  const range = max - min || 1;
-  const n = history.length + forecast.length;
-  const toPt = (v: number, i: number) => ({
-    x: (i / (n - 1)) * W,
-    y: H - ((v - min) / range) * (H - 24) - 12,
-    value: v,
-  });
-  const hist = history.map((v, i) => toPt(v, i));
-  const fore = forecast.map((v, i) => toPt(v, history.length + i));
-  const histPts = hist.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const forePts = fore.length > 0 ? [hist[hist.length - 1], ...fore].map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") : "";
-  const fillPts = `0,${H} ${histPts} ${hist[hist.length - 1]?.x ?? 0},${H}`;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: H, background: "rgba(128,128,128,0.04)", borderRadius: 6 }}>
-      {[0.25, 0.5, 0.75].map((f) => (
-        <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="rgba(128,128,128,0.15)" strokeWidth="0.5" />
-      ))}
-      <polygon points={fillPts} fill={color} fillOpacity={0.12} />
-      <polyline points={histPts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      {fore.length > 0 && (
-        <>
-          <polyline points={forePts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeDasharray="6,4" opacity={0.75} />
-          <circle cx={fore[fore.length - 1].x} cy={fore[fore.length - 1].y} r={4} fill={color} />
-          <text x={fore[fore.length - 1].x - 6} y={fore[fore.length - 1].y - 8} fill={color} fontSize="11" fontWeight="700" textAnchor="end">
-            {format(fore[fore.length - 1].value)}{unit ?? ""}
-          </text>
-        </>
-      )}
-      <circle cx={hist[hist.length - 1].x} cy={hist[hist.length - 1].y} r={3} fill={color} />
-      <line x1={hist[hist.length - 1].x} x2={hist[hist.length - 1].x} y1="0" y2={H} stroke="rgba(128,128,128,0.4)" strokeDasharray="3,3" strokeWidth="0.5" />
-      <text x={hist[hist.length - 1].x + 4} y={12} fill="rgba(128,128,128,0.65)" fontSize="9" fontWeight="600">now</text>
-    </svg>
+    </div>,
+    document.body
   );
 }
 
-// -- Card component ---------------------------------------------------------
-export const KpiCard: React.FC<KpiCardProps> = ({
-  label, value, rawValue, prevRawValue, sparkline, color = "#4589FF",
-  suffix, higherIsBetter = false, subtext, loading, format, unit, related, description,
-}) => {
-  const [detailOpen, setDetailOpen] = useState(false);
+// ---------------------------------------------------------------------------
+// KpiCard — main component
+// ---------------------------------------------------------------------------
+export interface KpiCardProps {
+  label: string;
+  value: React.ReactNode;
+  color?: string;
+  rawValue?: number;
+  prevRawValue?: number | null;
+  higherIsBetter?: boolean;
+  /** @deprecated use higherIsBetter */
+  inverted?: boolean;
+  sparkline?: number[];
+  onDrillToForecast?: (label: string, sparkline: number[], color?: string) => void;
+  customContent?: React.ReactNode;
+  isLoading?: boolean;
+  loading?: boolean;
+  style?: React.CSSProperties;
+  suffix?: string;
+  subtext?: string;
+}
 
-  const delta = useMemo(() => {
+export function KpiCard({
+  label, value, color, rawValue, prevRawValue, higherIsBetter, inverted = false,
+  sparkline, onDrillToForecast, customContent, isLoading, loading, style, suffix, subtext,
+}: KpiCardProps) {
+  const forecastOpener = useContext(ForecastContext);
+  const correlationsCtx = useContext(CorrelationsContext);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<"impact" | "anomaly" | "attribution" | null>(null);
+  const hasSpark = !!sparkline && sparkline.length >= 2;
+  const busy = isLoading || loading;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (cardRef.current && cardRef.current.contains(t)) return;
+      if ((t as HTMLElement).closest?.(".kpi-action-menu-portal")) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  const delta = useMemo<number | null>(() => {
     if (rawValue == null || prevRawValue == null) return null;
     if (prevRawValue === 0) return rawValue === 0 ? 0 : 100;
     return ((rawValue - prevRawValue) / Math.abs(prevRawValue)) * 100;
   }, [rawValue, prevRawValue]);
 
-  const isFlat = delta != null && Math.abs(delta) < 0.1;
-  const good = delta != null && (higherIsBetter ? delta > 0 : delta < 0);
-  const arrowColor = delta == null ? "transparent" : isFlat ? "rgba(128,128,128,0.6)" : good ? "#0D9C29" : "#C21930";
+  const effectiveHigherIsBetter = higherIsBetter ?? !inverted;
+  const trendUp = delta !== null && delta > 0;
+  const trendGood = delta !== null && (effectiveHigherIsBetter ? trendUp : !trendUp);
+  const trendColor = delta === null ? undefined : delta === 0 ? undefined : trendGood ? GREEN : RED;
+  const arrow = delta === null ? "" : delta === 0 ? "—" : trendUp ? "↑" : "↓";
 
-  const clickable = (sparkline && sparkline.length >= 2) || (related && related.length > 0) || (prevRawValue != null && rawValue != null);
+  const THRESHOLD_COLORS = new Set([GREEN, RED, YELLOW]);
+  const showProgressBar = hasSpark && !customContent && rawValue != null && THRESHOLD_COLORS.has(color ?? "");
+  let progressPct = 50;
+  if (showProgressBar) {
+    if (color === GREEN) progressPct = effectiveHigherIsBetter ? 85 : 15;
+    else if (color === RED) progressPct = effectiveHigherIsBetter ? 15 : 85;
+  }
+
+  const doForecast = () => {
+    setMenuOpen(false);
+    if (hasSpark) {
+      if (onDrillToForecast) onDrillToForecast(label, sparkline!, color);
+      else if (forecastOpener) forecastOpener(label, sparkline!, color);
+    }
+  };
+  const doRelated = () => {
+    setMenuOpen(false);
+    if (correlationsCtx && hasSpark) correlationsCtx.open({ label, sparkline: sparkline!, color, inverted: !effectiveHigherIsBetter });
+  };
 
   return (
-    <>
-      <div
-        onClick={clickable ? () => setDetailOpen(true) : undefined}
-        style={{
-          minWidth: 0,
-          padding: "14px 16px",
-          background: "rgba(128,128,128,0.06)",
-          border: `1px solid ${color}30`,
-          borderRadius: 10,
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          cursor: clickable ? "pointer" : "default",
-          transition: "border-color 120ms ease, transform 120ms ease",
-        }}
-        onMouseEnter={(e) => { if (clickable) e.currentTarget.style.borderColor = `${color}88`; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = `${color}30`; }}
-      >
-        <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(128,128,128,0.9)", textTransform: "uppercase", letterSpacing: 0.5, display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-          {clickable && (
-            <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.4, marginLeft: "auto" }}>
-              <path d="M2 8 L8 2 M4 2 L8 2 L8 6" stroke="currentColor" strokeWidth="1" fill="none" />
-            </svg>
-          )}
+    <div
+      ref={cardRef}
+      className={`uj-kpi-card-enhanced${hasSpark ? " clickable" : ""}`}
+      style={{ cursor: hasSpark ? "pointer" : undefined, ...style }}
+      title={hasSpark ? `${label} — click for options` : label}
+      onClick={(e) => { if (hasSpark) { e.stopPropagation(); setMenuOpen(prev => !prev); } }}
+    >
+      <Text style={{ fontSize: 11, opacity: 0.7, display: "block" }}>{label}</Text>
+      {busy ? (
+        <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
+          <ProgressCircle size="small" />
         </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{loading ? "…" : value}</div>
-          {suffix && <div style={{ fontSize: 12, opacity: 0.7 }}>{suffix}</div>}
-          {delta != null && (
-            <div style={{ fontSize: 11, fontWeight: 600, color: arrowColor, marginLeft: "auto" }}>
-              {isFlat ? "—" : good ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
+      ) : (
+        <>
+          {customContent ?? (
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 5, marginTop: 4 }}>
+              <Heading level={3} style={{ margin: 0, color }}>{value}</Heading>
+              {suffix && <span style={{ fontSize: 11, opacity: 0.55 }}>{suffix}</span>}
+              {delta !== null && (
+                <span style={{ fontSize: 11, fontWeight: 700, color: trendColor, whiteSpace: "nowrap", lineHeight: 1 }} title={`vs previous period: ${trendUp ? "+" : ""}${delta.toFixed(1)}%`}>
+                  {arrow}&thinsp;{Math.abs(delta).toFixed(1)}%
+                </span>
+              )}
             </div>
           )}
-        </div>
-        {subtext && <div style={{ fontSize: 10, opacity: 0.6 }}>{subtext}</div>}
-        {sparkline && sparkline.length >= 2 && <KpiSparkline data={sparkline} color={color} format={format} />}
-      </div>
-
-      <KpiDetailModal
-        show={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        label={label}
-        value={value}
-        color={color}
-        sparkline={sparkline}
-        prevRawValue={prevRawValue}
-        rawValue={rawValue}
-        delta={delta}
-        higherIsBetter={higherIsBetter}
-        related={related}
-        description={description}
-        format={format}
-        unit={unit}
-      />
-    </>
+          {subtext && <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2 }}>{subtext}</div>}
+          {hasSpark && (
+            <div style={{ width: "100%", marginTop: 2 }}>
+              <KpiSparkline data={sparkline!} color={color ?? "#4589FF"} />
+            </div>
+          )}
+          {showProgressBar && (
+            <div style={{
+              marginTop: 6, position: "relative", height: 4, borderRadius: 2, overflow: "visible",
+              background: effectiveHigherIsBetter ? "linear-gradient(to right, #b01010, #c08010, #0D9C29)" : "linear-gradient(to right, #0D9C29, #c08010, #b01010)",
+            }}>
+              <div style={{ position: "absolute", top: -3, width: 2, height: 10, background: "#fff", borderRadius: 1, left: `${progressPct}%`, transform: "translateX(-50%)", boxShadow: "0 0 4px rgba(0,0,0,0.7)", opacity: 0.9 }} />
+            </div>
+          )}
+        </>
+      )}
+      {menuOpen && hasSpark && (() => {
+        const rect = cardRef.current?.getBoundingClientRect();
+        if (!rect) return null;
+        const menuW = 200;
+        const left = Math.max(8, Math.min(window.innerWidth - menuW - 8, rect.left + rect.width / 2 - menuW / 2));
+        const top = rect.bottom + 6;
+        return createPortal(
+          <div
+            className="kpi-action-menu kpi-action-menu-portal"
+            style={{ position: "fixed", top, left, width: menuW }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="kpi-action-btn" onClick={doForecast}>📈 Forecast</button>
+            <button className="kpi-action-btn" onClick={doRelated}>⟷ Related Metrics</button>
+            <div className="kpi-action-sep" />
+            <button className="kpi-action-btn" onClick={() => { setMenuOpen(false); setActivePanel("impact"); }}>👥 Impact</button>
+            <button className="kpi-action-btn" onClick={() => { setMenuOpen(false); setActivePanel("anomaly"); }}>🔍 Anomaly</button>
+            <button className="kpi-action-btn" onClick={() => { setMenuOpen(false); setActivePanel("attribution"); }}>📋 Change Attribution</button>
+          </div>,
+          document.body
+        );
+      })()}
+      {activePanel && (
+        <KpiPanelOverlay
+          label={label}
+          rawValue={rawValue}
+          sparkline={sparkline}
+          color={color}
+          panel={activePanel}
+          onClose={() => setActivePanel(null)}
+          effectiveHigherIsBetter={effectiveHigherIsBetter}
+        />
+      )}
+    </div>
   );
-};
+}
+
+// Legacy re-export shape
+export type RelatedMetric = { label: string; value: string; color?: string };

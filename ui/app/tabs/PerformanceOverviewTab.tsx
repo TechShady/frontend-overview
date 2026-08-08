@@ -330,9 +330,16 @@ export const PerformanceOverviewTab: React.FC = () => {
 
   return (
     <div>
-      {/* Fleet grade + primary KPI row */}
-      <div style={{ display: "flex", gap: 20, alignItems: "center", padding: "20px 20px 4px" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      {/* Unified 5-column KPI grid — Fleet Grade spans first column (all 3 rows), KPIs align in 5 equal columns */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "160px repeat(5, minmax(140px, 1fr))",
+        gap: 10,
+        padding: "20px 20px 4px",
+        alignItems: "stretch",
+      }}>
+        {/* Fleet Grade — spans 3 rows */}
+        <div style={{ gridColumn: "1 / 2", gridRow: "1 / span 3", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
           <GradeBadge score={fleetScore} size={92} label="Fleet Grade" />
           {isFinite(prevFleetScore) && (
             <div style={{ fontSize: 11, opacity: 0.65 }}>
@@ -340,35 +347,27 @@ export const PerformanceOverviewTab: React.FC = () => {
             </div>
           )}
         </div>
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-          <KpiCard label="Web apps" value={String(scoredRows.length)} rawValue={scoredRows.length} color="#4589FF" />
-          <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color="#4589FF" higherIsBetter />
-          <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter />
-          <KpiCard label="Errors" value={fmt.num(totals.errors)} rawValue={totals.errors} prevRawValue={prevTotals.errors} color="#C21930" />
-          <KpiCard label="Error rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color="#C21930" />
-        </div>
-      </div>
 
-      {/* Performance & Apdex KPI row */}
-      <div style={{ padding: "8px 20px 4px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-          <KpiCard label="Avg session duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color="#4589FF" />
-          <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color="#0D9C29" higherIsBetter />
-          <KpiCard label="Satisfied actions" value={fmt.num(totals.satisfied)} rawValue={totals.satisfied} prevRawValue={prevTotals.satisfied} color="#0D9C29" higherIsBetter />
-          <KpiCard label="Tolerating actions" value={fmt.num(totals.tolerating)} rawValue={totals.tolerating} prevRawValue={prevTotals.tolerating} color="#F9A825" />
-          <KpiCard label="Frustrated actions" value={fmt.num(totals.frustrated)} rawValue={totals.frustrated} prevRawValue={prevTotals.frustrated} color="#C21930" />
-        </div>
-      </div>
+        {/* Row 1: Primary counters */}
+        <KpiCard label="Web apps" value={String(scoredRows.length)} rawValue={scoredRows.length} color="#4589FF" />
+        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color="#4589FF" higherIsBetter />
+        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter />
+        <KpiCard label="Errors" value={fmt.num(totals.errors)} rawValue={totals.errors} prevRawValue={prevTotals.errors} color="#C21930" />
+        <KpiCard label="Error rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color="#C21930" />
 
-      {/* Fleet Core Web Vitals KPI row */}
-      <div style={{ padding: "8px 20px 4px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-          <KpiCard label="Fleet LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color="#4589FF" subtext="target ≤ 2.5s" />
-          <KpiCard label="Fleet INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color="#08BDBA" subtext="target ≤ 200ms" />
-          <KpiCard label="Fleet CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color="#A56EFF" subtext="target ≤ 0.1" />
-          <KpiCard label="Fleet TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color="#F9A825" subtext="target ≤ 800ms" />
-          <KpiCard label="Load event end" value={fmt.ms(fleetVitals.loadEnd)} rawValue={isFinite(fleetVitals.loadEnd) ? fleetVitals.loadEnd : undefined} color="#FF7A56" subtext="target ≤ 2.5s" />
-        </div>
+        {/* Row 2: Performance & Apdex */}
+        <KpiCard label="Avg session duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color="#4589FF" />
+        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color="#0D9C29" higherIsBetter />
+        <KpiCard label="Satisfied actions" value={fmt.num(totals.satisfied)} rawValue={totals.satisfied} prevRawValue={prevTotals.satisfied} color="#0D9C29" higherIsBetter />
+        <KpiCard label="Tolerating actions" value={fmt.num(totals.tolerating)} rawValue={totals.tolerating} prevRawValue={prevTotals.tolerating} color="#F9A825" />
+        <KpiCard label="Frustrated actions" value={fmt.num(totals.frustrated)} rawValue={totals.frustrated} prevRawValue={prevTotals.frustrated} color="#C21930" />
+
+        {/* Row 3: Fleet Core Web Vitals */}
+        <KpiCard label="Fleet LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color="#4589FF" subtext="target ≤ 2.5s" />
+        <KpiCard label="Fleet INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color="#08BDBA" subtext="target ≤ 200ms" />
+        <KpiCard label="Fleet CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color="#A56EFF" subtext="target ≤ 0.1" />
+        <KpiCard label="Fleet TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color="#F9A825" subtext="target ≤ 800ms" />
+        <KpiCard label="Load event end" value={fmt.ms(fleetVitals.loadEnd)} rawValue={isFinite(fleetVitals.loadEnd) ? fleetVitals.loadEnd : undefined} color="#FF7A56" subtext="target ≤ 2.5s" />
       </div>
 
       <SectionCard

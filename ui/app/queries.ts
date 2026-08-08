@@ -454,3 +454,34 @@ export function errorsBucketedMetricsQuery(days: number, selected: string | null
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Shared Time-Lapse metrics — one row per time bucket, aggregated across all
+// selected web apps. Feeds the hotness Z-score strip in the header.
+// bucketLabel accepts DQL-friendly duration literals: "1m", "5m", "10m",
+// "30m", "1h", "3h", "6h", "12h", "24h".
+// ---------------------------------------------------------------------------
+export function sharedTimelapseMetricsQuery(days: number, selected: string | null, bucketLabel: string): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
+        bkt = bin(start_time, ${bucketLabel})
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        totalActions = countIf(isAction),
+        avgDurationMs = avg(if(isAction, dur_ms)),
+        errorCount = countIf(characteristics.has_error == true),
+        lcp = avg(toDouble(web_vitals.largest_contentful_paint) / 1000000.0),
+        cls = avg(toDouble(web_vitals.cumulative_layout_shift)),
+        inp = avg(toDouble(web_vitals.interaction_to_next_paint) / 1000000.0),
+        ttfb = avg(toDouble(web_vitals.time_to_first_byte) / 1000000.0),
+        by:{bkt}
+    | fieldsAdd errorRate = (toDouble(errorCount) / (toDouble(totalActions) + 0.0001)) * 100
+    | sort bkt asc
+    | limit 5000
+  `;
+}
+

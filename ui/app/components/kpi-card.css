@@ -1,0 +1,104 @@
+/* Ported verbatim from user-journey-app/ui/app/pages/UserJourney.css lines 99-215 */
+
+.uj-kpi-card-enhanced {
+  flex: 1 1 140px;
+  min-width: 140px;
+  max-width: 260px;
+  background: rgba(128, 128, 128, 0.06);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  text-align: center;
+  position: relative;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.uj-kpi-card-enhanced:hover {
+  border-color: rgba(69, 137, 255, 0.4);
+  box-shadow: 0 2px 8px rgba(69, 137, 255, 0.08);
+}
+
+.uj-kpi-card-enhanced.clickable {
+  cursor: pointer;
+}
+
+.uj-kpi-card-enhanced.clickable:hover {
+  transform: translateY(-1px);
+}
+
+.kpi-drill-hint {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  color: rgba(69, 137, 255, 0.8);
+  pointer-events: none;
+}
+
+.uj-kpi-card-enhanced:hover .kpi-drill-hint {
+  opacity: 0.75;
+}
+
+.kpi-related-btn {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  color: rgba(128, 128, 128, 0.75);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 9px;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.kpi-related-btn:hover {
+  background: rgba(69, 137, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(69, 137, 255, 0.4);
+}
+
+/* Action menu popover */
+.kpi-action-menu {
+  z-index: 99999;
+  background: rgba(20, 24, 46, 0.98);
+  border: 1px solid rgba(69, 137, 255, 0.35);
+  border-radius: 8px;
+  padding: 6px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-action-menu-portal {
+  position: fixed !important;
+}
+
+.kpi-action-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.88);
+  padding: 8px 14px;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 100ms ease;
+}
+
+.kpi-action-btn:hover {
+  background: rgba(69, 137, 255, 0.14);
+  color: #fff;
+}
+
+.kpi-action-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}

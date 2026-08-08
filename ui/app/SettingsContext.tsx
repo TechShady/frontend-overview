@@ -144,10 +144,24 @@ export function useSettings(): SettingsCtx {
   return ctx;
 }
 
+// When the TimeframeSelector arrow buttons shift the window into the past
+// (e.g. `now-4h..now-2h`), we need queries to actually look at that shifted
+// window. Track the current end anchor (epoch ms) at module scope so
+// `periodClause` can emit absolute ISO timestamps, and query strings change
+// when the user shifts the window (driving useDql refetch).
+let CURRENT_ANCHOR_MS: number | null = null;
+export function setQueryAnchorMs(ms: number | null) { CURRENT_ANCHOR_MS = ms; }
+export function getQueryAnchorMs(): number | null { return CURRENT_ANCHOR_MS; }
+function toIso(ms: number): string { return new Date(ms).toISOString(); }
+
 export function periodClause(days: number, prev = false): string {
-  // Emit relative timeframes using DQL `now()` so the query string is stable
-  // across renders — otherwise the SDK's useDql refires on every render.
   const d = Math.max(0.0007, days); // ~1 min minimum
+  if (CURRENT_ANCHOR_MS != null) {
+    const durMs = d * 86400000;
+    const to = prev ? CURRENT_ANCHOR_MS - durMs : CURRENT_ANCHOR_MS;
+    const from = to - durMs;
+    return `from: "${toIso(from)}", to: "${toIso(to)}"`;
+  }
   if (prev) return `from: now()-${d * 2}d, to: now()-${d}d`;
   return `from: now()-${d}d`;
 }
