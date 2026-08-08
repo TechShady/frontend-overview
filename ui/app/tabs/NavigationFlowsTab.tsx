@@ -49,16 +49,26 @@ export const NavigationFlowsTab: React.FC = () => {
       cell: ({ value }: any) => <span>{fmt.pct(Number(value))}</span> },
   ], [maxViews]);
 
-  const transitionRows = useMemo(() =>
-    (transitions.data?.records ?? [])
-      .map((r: any) => ({
-        application: String(r.application ?? ""),
-        from: String(r.page ?? ""),
-        to: String(r.nextPage ?? ""),
-        transitions: Number(r.transitions ?? 0),
-      }))
-      .filter((r) => r.transitions >= minTransitions),
-  [transitions.data, minTransitions]);
+  const transitionRows = useMemo(() => {
+    // Server returns `path` arrays per session; derive from→to pairs client-side
+    // because DQL `shift()` isn't available in this tenant.
+    const agg: Record<string, { application: string; from: string; to: string; transitions: number }> = {};
+    (transitions.data?.records ?? []).forEach((r: any) => {
+      const app = String(r.application ?? "");
+      const path: string[] = Array.isArray(r.path) ? r.path : [];
+      for (let i = 0; i < path.length - 1; i++) {
+        const from = String(path[i] ?? "");
+        const to = String(path[i + 1] ?? "");
+        if (!from || !to || from === to) continue;
+        const key = `${app}\u0001${from}\u0001${to}`;
+        if (!agg[key]) agg[key] = { application: app, from, to, transitions: 0 };
+        agg[key].transitions += 1;
+      }
+    });
+    return Object.values(agg)
+      .sort((a, b) => b.transitions - a.transitions)
+      .filter((r) => r.transitions >= minTransitions);
+  }, [transitions.data, minTransitions]);
 
   const maxTrans = Math.max(1, ...transitionRows.map((r) => r.transitions));
   const transCols: any = useMemo(() => [
