@@ -10,7 +10,7 @@ export type DqlState<T = Record<string, any>> = {
 };
 
 export function useDql(query: string | null, _deps: unknown[] = []): DqlState {
-  const res = useSdkDql({ query: query ?? "fetch user.events | limit 0" });
+  const res = useSdkDql(query ?? "fetch user.events | limit 0");
   return {
     data: res.data ? { records: (res.data.records ?? []) as any[] } : null,
     loading: !!res.isLoading,

@@ -145,11 +145,11 @@ export function useSettings(): SettingsCtx {
 }
 
 export function periodClause(days: number, prev = false): string {
-  const durMs = Math.max(60_000, Math.round(days * 86_400_000));
-  const now = Date.now();
-  const to = prev ? now - durMs : now;
-  const from = to - durMs;
-  return `from: "${new Date(from).toISOString()}", to: "${new Date(to).toISOString()}"`;
+  // Emit relative timeframes using DQL `now()` so the query string is stable
+  // across renders — otherwise the SDK's useDql refires on every render.
+  const d = Math.max(0.0007, days); // ~1 min minimum
+  if (prev) return `from: now()-${d * 2}d, to: now()-${d}d`;
+  return `from: now()-${d}d`;
 }
 
 export function webAppFilterClause(selected: string | null, field = "application"): string {

@@ -85,7 +85,7 @@ export function errorsPerAppQuery(days: number, selected: string | null, prev = 
         totalActions = count(),
         totalErrors = countIf(event.type == "ERROR"),
         sessions = countDistinct(dt.rum.session.id),
-        errSessions = countDistinctIf(dt.rum.session.id, event.type == "ERROR"),
+        errSessions = countDistinct(if(event.type == "ERROR", dt.rum.session.id)),
         by:{application = frontend.name}
     | fieldsAdd
         errorRate = (toDouble(totalErrors) / (toDouble(totalActions) + 0.0001)) * 100,
