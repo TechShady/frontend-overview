@@ -216,23 +216,46 @@ export function TimelapseTable<T extends Record<string, any>>({
   }, [data, sortOpt]);
 
   // -----------------------------------------------------------------------
-  // Inject Movement column + wrap first column with flicker
+  // Inject Movement column + wrap first column with flicker + header click sync
   // -----------------------------------------------------------------------
   const wrappedColumns = useMemo(() => {
     const enhanced = columns.map((col: any) => {
-      if (col.accessor !== firstColumnField && col.id !== firstColumnField) return col;
-      const originalCell = col.cell;
-      return {
-        ...col,
-        cell: (info: any) => {
-          const row = info.row?.original as T | undefined;
-          const key = row ? rowKey(row) : "";
-          const flick = flickerByKey[key];
-          const cls = flick === "up" ? "tl-flicker-up" : flick === "down" ? "tl-flicker-down" : "";
-          const content = originalCell ? originalCell(info) : String(info.value ?? "");
-          return <span className={cls} style={{ display: "inline-block" }}>{content}</span>;
-        },
-      };
+      let result = { ...col };
+
+      // Wrap first column cell with flicker animation
+      if (col.accessor === firstColumnField || col.id === firstColumnField) {
+        const origCell = col.cell;
+        result = {
+          ...result,
+          cell: (info: any) => {
+            const row = info.row?.original as T | undefined;
+            const key = row ? rowKey(row) : "";
+            const flick = flickerByKey[key];
+            const cls = flick === "up" ? "tl-flicker-up" : flick === "down" ? "tl-flicker-down" : "";
+            const content = origCell ? origCell(info) : String(info.value ?? "");
+            return <span className={cls} style={{ display: "inline-block" }}>{content}</span>;
+          },
+        };
+      }
+
+      // Intercept header clicks so sortValue stays in sync with DataTable's column sort.
+      // Both DataTable's own sort and our setSortValue fire from the same click.
+      const colKey = col.accessor ?? col.id ?? "";
+      const matchOpt = sortOptions.find((o) => o.value === colKey);
+      if (matchOpt) {
+        const origHeader = result.header;
+        const optValue = matchOpt.value;
+        result = {
+          ...result,
+          header: (info: any) => (
+            <span onClick={() => setSortValue(optValue)} style={{ cursor: "inherit" }}>
+              {typeof origHeader === "function" ? origHeader(info) : origHeader}
+            </span>
+          ),
+        };
+      }
+
+      return result;
     });
 
     const movementCol = {
@@ -246,7 +269,7 @@ export function TimelapseTable<T extends Record<string, any>>({
         const key = row ? rowKey(row) : "";
         const delta = movementByKey[key];
         if (delta == null) return <span style={{ opacity: 0.35, fontFamily: "monospace" }}>—</span>;
-        if (delta === 0) return <span className="tl-move-arrow" style={{ color: "rgba(128,128,128,0.55)" }} title="No rank change since first bucket">= 0</span>;
+        if (delta === 0) return <span className="tl-move-arrow" style={{ color: "rgba(128,128,128,0.55)" }} title="No rank change">=</span>;
         if (delta > 0) {
           return (
             <span className="tl-move-arrow" style={{ color: "#0D9C29" }} title={`Moved up ${delta} position${delta === 1 ? "" : "s"}`}>
@@ -265,7 +288,7 @@ export function TimelapseTable<T extends Record<string, any>>({
     };
 
     return [...enhanced, movementCol];
-  }, [columns, firstColumnField, rowKey, flickerByKey, movementByKey]);
+  }, [columns, firstColumnField, rowKey, flickerByKey, movementByKey, sortOptions, setSortValue]);
 
   // Attach _movement to each row so DataTable can display + sort it
   const decorated = useMemo(() => sortedData.map((r) => ({ ...r, _movement: movementByKey[rowKey(r)] ?? 0 })), [sortedData, movementByKey, rowKey]);

@@ -11,10 +11,11 @@ import { Switch } from "@dynatrace/strato-components/forms";
 import { TimeframeSelector } from "@dynatrace/strato-components/filters";
 import type { Timeframe } from "@dynatrace/strato-components/core";
 
+import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import {
   SettingsProvider, useSettings,
   TIMEFRAME_OPTIONS, REFRESH_OPTIONS, ALL_TABS,
-  setQueryAnchorMs,
+  setQueryAnchorMs, getQueryAnchorMs,
 } from "./SettingsContext";
 import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, SharedBucketMetrics } from "./TimelapseContext";
 import { DisclaimerModal } from "./components/DisclaimerModal";
@@ -750,28 +751,88 @@ const AppInner: React.FC = () => {
           toMs={toMs}
           onClose={() => setForecastModal(null)}
           getRequeryData={async (analyzeDays, datapointMinutes) => {
-            // We don't run a fresh DQL query here; instead we resample the sparkline that
-            // was captured for the KPI. This lets Datapoints/Analyze dropdowns visibly
-            // change the shape without needing per-KPI DQL wiring.
-            const src = forecastModal.sparkline;
-            if (!src || src.length === 0) return [];
-            // Assume the original sparkline covers the app's currently-selected timeframe
-            // at ~15-minute resolution (our default bucket for short frames). Resample
-            // proportional to the chosen datapoint size, and truncate to analyzeDays.
-            const factor = Math.max(1, Math.round(datapointMinutes / 15));
-            const totalMs = toMs - fromMs;
-            const analyzeMs = analyzeDays * 24 * 3600 * 1000;
-            const fraction = Math.min(1, analyzeMs / Math.max(1, totalMs));
-            const startIdx = Math.max(0, src.length - Math.ceil(src.length * fraction));
-            const window = src.slice(startIdx);
-            if (factor === 1) return window;
-            const out: number[] = [];
-            for (let i = 0; i < window.length; i += factor) {
-              const chunk = window.slice(i, i + factor);
-              if (chunk.length === 0) break;
-              out.push(chunk.reduce((a, b) => a + b, 0) / chunk.length);
+            try {
+              // Cap points to stay under query limit (5000 records)
+              const maxPts = 4800;
+              const requestedPts = Math.round(analyzeDays * 1440 / datapointMinutes);
+              const effMins = requestedPts > maxPts
+                ? Math.ceil(analyzeDays * 1440 / maxPts)
+                : datapointMinutes;
+              const snapMins = ([15, 30, 60, 120, 360, 720, 1440] as const).find((m) => m >= effMins) ?? 1440;
+              const dpLabel = snapMins >= 1440 ? "1d" : snapMins >= 60 ? `${snapMins / 60}h` : `${snapMins}m`;
+
+              const anchor = getQueryAnchorMs() ?? Date.now();
+              const fromIso = new Date(anchor - analyzeDays * 86400000).toISOString();
+              const toIso = new Date(anchor).toISOString();
+              const sel = webAppFilter.selected;
+              const appFilt = sel ? ` and frontend.name == "${sel.replace(/"/g, '\\"')}"` : "";
+              const lbl = forecastModal.label.toLowerCase();
+              const isAct = `characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"`;
+
+              const query = `fetch user.events, from: "${fromIso}", to: "${toIso}"
+| filter isNotNull(frontend.name)${appFilt}
+| fieldsAdd bkt = bin(start_time, ${dpLabel}), isAct = ${isAct}, dur_ms = toDouble(duration) / 1000000.0
+| summarize
+    sessions = countDistinct(dt.rum.session.id),
+    actions = countIf(isAct),
+    errors = countIf(characteristics.has_error == true),
+    sat = countIf(isAct and dur_ms <= 3000),
+    tol = countIf(isAct and dur_ms > 3000 and dur_ms <= 12000),
+    fru = countIf(isAct and dur_ms > 12000),
+    avgDur = avg(if(isAct, dur_ms)),
+    lcp = avg(toDouble(web_vitals.largest_contentful_paint) / 1000000.0),
+    inp = avg(toDouble(web_vitals.interaction_to_next_paint) / 1000000.0),
+    cls = avg(toDouble(web_vitals.cumulative_layout_shift)),
+    ttfb = avg(toDouble(web_vitals.time_to_first_byte) / 1000000.0),
+    loadEnd = avg(toDouble(performance.load_event_end) / 1000000.0),
+    by:{bkt}
+| sort bkt asc
+| limit 5000`;
+
+              const start = await queryExecutionClient.queryExecute({
+                body: { query, requestTimeoutMilliseconds: 60000, maxResultRecords: 5000 },
+              });
+              let recs: any[];
+              if (start.state === "SUCCEEDED") {
+                recs = (start.result?.records ?? []) as any[];
+              } else {
+                const token = start.requestToken;
+                if (!token) throw new Error("No query token");
+                recs = [];
+                for (let i = 0; i < 60; i++) {
+                  await new Promise((r) => setTimeout(r, 1000));
+                  const poll = await queryExecutionClient.queryPoll({ requestToken: token });
+                  if (poll.state === "SUCCEEDED") { recs = (poll.result?.records ?? []) as any[]; break; }
+                  if (poll.state === "FAILED" || poll.state === "CANCELLED") throw new Error(`Query ${poll.state}`);
+                }
+              }
+              if (recs.length === 0) return forecastModal.sparkline;
+
+              return recs.map((r): number => {
+                let v: number;
+                if (lbl.includes("error rate")) {
+                  const a = Number(r.actions ?? 0);
+                  v = a > 0 ? (Number(r.errors ?? 0) / a) * 100 : 0;
+                } else if (lbl.includes("apdex")) {
+                  const s = Number(r.sat ?? 0), t = Number(r.tol ?? 0), f = Number(r.fru ?? 0);
+                  const d = s + t + f; v = d > 0 ? (s + t * 0.5) / d : 0;
+                } else if (lbl.includes("satisfied")) { v = Number(r.sat ?? 0); }
+                else if (lbl.includes("tolerating")) { v = Number(r.tol ?? 0); }
+                else if (lbl.includes("frustrated")) { v = Number(r.fru ?? 0); }
+                else if (lbl.includes("duration")) { v = Number(r.avgDur ?? 0); }
+                else if (lbl.includes("lcp")) { v = Number(r.lcp ?? 0); }
+                else if (lbl.includes("inp")) { v = Number(r.inp ?? 0); }
+                else if (lbl.includes("cls")) { v = Number(r.cls ?? 0); }
+                else if (lbl.includes("ttfb")) { v = Number(r.ttfb ?? 0); }
+                else if (lbl.includes("load")) { v = Number(r.loadEnd ?? 0); }
+                else if (lbl.includes("error")) { v = Number(r.errors ?? 0); }
+                else if (lbl.includes("action")) { v = Number(r.actions ?? 0); }
+                else { v = Number(r.sessions ?? 0); }
+                return isFinite(v) ? v : 0;
+              });
+            } catch {
+              return forecastModal.sparkline;
             }
-            return out;
           }}
         />
       )}

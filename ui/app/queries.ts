@@ -485,3 +485,214 @@ export function sharedTimelapseMetricsQuery(days: number, selected: string | nul
   `;
 }
 
+// ===========================================================================
+// Navigation & Flows — new queries for NavigationFlowsTab sub-tabs
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Full geo metrics — includes Apdex components (sat/tol/fru) and Core Web
+// Vitals per country. Used by GeoHeatmapSubTab and WorldMapSubTab.
+// ---------------------------------------------------------------------------
+export function geoFullQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        lcp_ms = toDouble(web_vitals.largest_contentful_paint) / 1000000.0,
+        cls_v  = toDouble(web_vitals.cumulative_layout_shift),
+        inp_ms = toDouble(web_vitals.interaction_to_next_paint) / 1000000.0,
+        isSat  = dur_ms <= 1000,
+        isTol  = dur_ms > 1000 and dur_ms <= 4000,
+        isFru  = dur_ms > 4000
+    | summarize
+        sessions   = countDistinct(dt.rum.session.id),
+        actions    = count(),
+        avg_dur    = avg(dur_ms),
+        errors     = countIf(characteristics.has_error == true),
+        satisfied  = countIf(isSat),
+        tolerating = countIf(isTol),
+        frustrated = countIf(isFru),
+        lcp_avg    = avg(if(isNotNull(web_vitals.largest_contentful_paint), lcp_ms)),
+        cls_avg    = avg(if(isNotNull(web_vitals.cumulative_layout_shift), cls_v)),
+        inp_avg    = avg(if(isNotNull(web_vitals.interaction_to_next_paint), inp_ms)),
+        by: {country = geo.country.iso_code}
+    | sort sessions desc
+    | limit 300
+  `;
+}
+
+// Bucketed version of geoFullQuery for WorldMapSubTab timelapse.
+export function geoFullBucketedQuery(days: number, selected: string | null, bucketLabel?: string): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        lcp_ms = toDouble(web_vitals.largest_contentful_paint) / 1000000.0,
+        cls_v  = toDouble(web_vitals.cumulative_layout_shift),
+        inp_ms = toDouble(web_vitals.interaction_to_next_paint) / 1000000.0,
+        isSat  = dur_ms <= 1000,
+        isTol  = dur_ms > 1000 and dur_ms <= 4000,
+        isFru  = dur_ms > 4000,
+        bkt    = bin(start_time, ${label})
+    | summarize
+        sessions   = countDistinct(dt.rum.session.id),
+        actions    = count(),
+        avg_dur    = avg(dur_ms),
+        errors     = countIf(characteristics.has_error == true),
+        satisfied  = countIf(isSat),
+        tolerating = countIf(isTol),
+        frustrated = countIf(isFru),
+        lcp_avg    = avg(if(isNotNull(web_vitals.largest_contentful_paint), lcp_ms)),
+        cls_avg    = avg(if(isNotNull(web_vitals.cumulative_layout_shift), cls_v)),
+        inp_avg    = avg(if(isNotNull(web_vitals.interaction_to_next_paint), inp_ms)),
+        by: {country = geo.country.iso_code, hour_bucket = bkt}
+    | sort hour_bucket asc, sessions desc
+    | limit 5000
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Sankey — user-journey page flow queries
+// ---------------------------------------------------------------------------
+
+// Primary Sankey flow: collectArray per session then aggregate s0-s4 counts.
+export function sankeyFlowQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.classifier == "navigation" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "user_action"
+    | fieldsAdd pageName = coalesce(view.name, view.url_path, "unknown")
+    | sort timestamp asc
+    | summarize path = collectArray(pageName), by: {dt.rum.session.id}
+    | fieldsAdd pathLen = arraySize(path)
+    | filter pathLen >= 2
+    | fieldsAdd
+        s0 = path[0], s1 = path[1],
+        s2 = if(pathLen >= 3, path[2], else: "(exit)"),
+        s3 = if(pathLen >= 4, path[3], else: "(exit)"),
+        s4 = if(pathLen >= 5, path[4], else: "(exit)")
+    | summarize sessions = count(), by: {s0, s1, s2, s3, s4}
+    | sort sessions desc
+    | limit 200
+  `;
+}
+
+// Extended paths — full per-session path arrays for loop/endpoint/trends analysis.
+export function sankeyExtendedPathsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.classifier == "navigation" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "user_action"
+    | fieldsAdd pageName = coalesce(view.name, view.url_path, "unknown")
+    | sort timestamp asc
+    | summarize path = collectArray(pageName), by: {dt.rum.session.id}
+    | fieldsAdd pathLen = arraySize(path)
+    | filter pathLen >= 2
+    | limit 500
+  `;
+}
+
+// Avg duration per page — for Page Timing sub-tab.
+export function sankeyPageDurationQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.classifier == "navigation" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "user_action"
+    | fieldsAdd pageName = coalesce(view.name, view.url_path, "unknown")
+    | fieldsAdd dur_ms = toDouble(duration) / 1000000.0
+    | summarize
+        avgDuration = avg(dur_ms),
+        p90Duration = percentile(dur_ms, 90),
+        sessions    = count(),
+        by: {pageName}
+    | sort sessions desc
+    | limit 50
+  `;
+}
+
+// Previous-period extended paths — for Path Trends sub-tab comparison.
+export function sankeyPrevPathsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days, true)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.classifier == "navigation" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "user_action"
+    | fieldsAdd pageName = coalesce(view.name, view.url_path, "unknown")
+    | sort timestamp asc
+    | summarize path = collectArray(pageName), by: {dt.rum.session.id}
+    | fieldsAdd pathLen = arraySize(path)
+    | filter pathLen >= 2
+    | limit 500
+  `;
+}
+
+// Timelapse — per-bucket path aggregations for the Sankey Flow Chart.
+export function sankeyTimelapseQuery(days: number, selected: string | null, bucketLabel?: string): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const label = bucketLabel ?? bucketSizeForDays(days).label;
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.classifier == "navigation" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "user_action"
+    | fieldsAdd pageName = coalesce(view.name, view.url_path, "unknown")
+    | fieldsAdd event_ts = coalesce(start_time, timestamp)
+    | sort timestamp asc
+    | summarize path = collectArray(pageName), session_start = min(event_ts), by: {dt.rum.session.id}
+    | fieldsAdd pathLen = arraySize(path)
+    | filter pathLen >= 2
+    | fieldsAdd
+        s0 = path[0], s1 = path[1],
+        s2 = if(pathLen >= 3, path[2], else: "(exit)"),
+        s3 = if(pathLen >= 4, path[3], else: "(exit)"),
+        s4 = if(pathLen >= 5, path[4], else: "(exit)")
+    | fieldsAdd bucket_ts = bin(session_start, ${label})
+    | fieldsAdd bucket = formatTimestamp(bucket_ts, format: "yyyy-MM-dd HH:mm")
+    | summarize sessions = count(), by: {bucket, s0, s1, s2, s3, s4}
+    | sort bucket asc, sessions desc
+    | summarize top_paths = arraySlice(collectArray(record(s0, s1, s2, s3, s4, sessions)), from: 0, to: 100), by: {bucket}
+    | expand top_paths
+    | fields
+        bucket,
+        s0 = top_paths[s0], s1 = top_paths[s1],
+        s2 = top_paths[s2], s3 = top_paths[s3],
+        s4 = top_paths[s4], sessions = top_paths[sessions]
+    | sort bucket asc, sessions desc
+    | limit 200000
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Session Replay Spotlight — sessions ranked by computed impact score.
+// ---------------------------------------------------------------------------
+export function sessionReplayQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(dt.rum.session.id)${filt}
+    | fieldsAdd dur_ms = toDouble(duration) / 1000000.0
+    | summarize
+        err          = countIf(characteristics.has_error == true),
+        navs         = countDistinct(coalesce(view.name, view.url_path)),
+        interactions = countIf(characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction"),
+        dur_s        = sum(dur_ms) / 1000.0,
+        device       = max(device.type),
+        browser_name = max(browser.name),
+        country      = max(geo.country.iso_code),
+        start_time   = min(timestamp),
+        by: {session_id = dt.rum.session.id, frontend_name = frontend.name}
+    | fieldsAdd
+        is_bounce    = navs <= 1,
+        has_crash    = false,
+        impact_score = toDouble(err) * 4.0 + if(is_bounce, 10.0, else: 0.0) + max(0.0, (dur_s - 30.0) / 10.0)
+    | sort impact_score desc
+    | limit 100
+  `;
+}

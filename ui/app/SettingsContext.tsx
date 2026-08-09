@@ -11,7 +11,6 @@ export const ALL_TABS: string[] = [
   "Resource Consumption",
   "Cost & Ranking",
   "Traffic & Engagement",
-  "Geo & Devices",
   "Perf Budgets",
   "Hyperlyzer",
   "Problems",
