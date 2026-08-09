@@ -53,19 +53,19 @@ function ensureStyles() {
   s.id = STYLE_ID;
   s.textContent = `
 @keyframes tl-flicker-up {
-  0%   { color: inherit; text-shadow: none; }
-  20%  { color: #0D9C29; text-shadow: 0 0 8px rgba(13,156,41,0.55); }
-  60%  { color: #0D9C29; text-shadow: 0 0 8px rgba(13,156,41,0.35); }
-  100% { color: inherit; text-shadow: none; }
+  0%   { background: transparent; color: inherit; text-shadow: none; box-shadow: none; }
+  15%  { background: rgba(13,156,41,0.55);  color: #fff; text-shadow: 0 0 6px rgba(13,156,41,0.9);  box-shadow: 0 0 12px rgba(13,156,41,0.6); }
+  55%  { background: rgba(13,156,41,0.35);  color: #fff; text-shadow: 0 0 4px rgba(13,156,41,0.6);  box-shadow: 0 0 8px rgba(13,156,41,0.4); }
+  100% { background: transparent; color: inherit; text-shadow: none; box-shadow: none; }
 }
 @keyframes tl-flicker-down {
-  0%   { color: inherit; text-shadow: none; }
-  20%  { color: #C21930; text-shadow: 0 0 8px rgba(194,25,48,0.55); }
-  60%  { color: #C21930; text-shadow: 0 0 8px rgba(194,25,48,0.35); }
-  100% { color: inherit; text-shadow: none; }
+  0%   { background: transparent; color: inherit; text-shadow: none; box-shadow: none; }
+  15%  { background: rgba(194,25,48,0.55); color: #fff; text-shadow: 0 0 6px rgba(194,25,48,0.9); box-shadow: 0 0 12px rgba(194,25,48,0.6); }
+  55%  { background: rgba(194,25,48,0.35); color: #fff; text-shadow: 0 0 4px rgba(194,25,48,0.6); box-shadow: 0 0 8px rgba(194,25,48,0.4); }
+  100% { background: transparent; color: inherit; text-shadow: none; box-shadow: none; }
 }
-.tl-flicker-up   { animation: tl-flicker-up   400ms ease-out; font-weight: 700; }
-.tl-flicker-down { animation: tl-flicker-down 400ms ease-out; font-weight: 700; }
+.tl-flicker-up   { animation: tl-flicker-up   900ms ease-out; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+.tl-flicker-down { animation: tl-flicker-down 900ms ease-out; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
 .tl-move-arrow   { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; font-family: monospace; }
 `;
   document.head.appendChild(s);
@@ -160,7 +160,7 @@ export function TimelapseTable<T extends Record<string, any>>({
   const timeoutsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    if (!tl.enabled || !tl.playing || bucketCount === 0 || ranksPerBucket.length === 0) return;
+    if (!tl.enabled || bucketCount === 0 || ranksPerBucket.length === 0) return;
     const idx = playbackIdx;
     if (prevIdxRef.current === idx) return;
     const prev = prevIdxRef.current;
@@ -179,15 +179,14 @@ export function TimelapseTable<T extends Record<string, any>>({
     if (Object.keys(changes).length === 0) return;
     setFlickerByKey((prevState) => ({ ...prevState, ...changes }));
 
-    // Clear each after 400ms
     Object.keys(changes).forEach((k) => {
       if (timeoutsRef.current[k]) window.clearTimeout(timeoutsRef.current[k]);
       timeoutsRef.current[k] = window.setTimeout(() => {
         setFlickerByKey((s) => ({ ...s, [k]: null }));
         delete timeoutsRef.current[k];
-      }, 420);
+      }, 950);
     });
-  }, [playbackIdx, tl.enabled, tl.playing, ranksPerBucket, bucketCount, data, rowKey]);
+  }, [playbackIdx, tl.enabled, ranksPerBucket, bucketCount, data, rowKey]);
 
   useEffect(() => () => {
     Object.values(timeoutsRef.current).forEach((id) => window.clearTimeout(id));
@@ -246,8 +245,8 @@ export function TimelapseTable<T extends Record<string, any>>({
         const row = info.row?.original as T | undefined;
         const key = row ? rowKey(row) : "";
         const delta = movementByKey[key];
-        if (delta == null) return <span style={{ opacity: 0.4, fontFamily: "monospace" }}>—</span>;
-        if (delta === 0) return <span className="tl-move-arrow" style={{ color: "rgba(128,128,128,0.7)" }}>—</span>;
+        if (delta == null) return <span style={{ opacity: 0.35, fontFamily: "monospace" }}>—</span>;
+        if (delta === 0) return <span className="tl-move-arrow" style={{ color: "rgba(128,128,128,0.55)" }} title="No rank change since first bucket">= 0</span>;
         if (delta > 0) {
           return (
             <span className="tl-move-arrow" style={{ color: "#0D9C29" }} title={`Moved up ${delta} position${delta === 1 ? "" : "s"}`}>

@@ -133,9 +133,10 @@ const AppHeader: React.FC<{
   return (
     <div style={{
       position: "sticky", top: 0, zIndex: 50,
-      background: "rgba(128,128,128,0.06)",
-      borderBottom: "1px solid rgba(128,128,128,0.25)",
+      background: "var(--dt-colors-background-base-default, #0f1428)",
+      borderBottom: "1px solid rgba(128,128,128,0.35)",
       padding: "10px 20px 8px 20px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
     }}>
       <Flex alignItems="center" gap={12} flexWrap="wrap">
         <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 0.3 }}>Frontend Overview</div>
