@@ -367,15 +367,6 @@ export const HyperlyzerTab: React.FC = () => {
 
   const isLoading = browser.loading || os.loading || geo.loading || userAction.loading || median.loading || focusedFull.loading;
 
-  // AI Assist
-  const aiFindings = useMemo(() => findings.map(f => {
-    const slower = metric.higherIsBetter ? f.ratio < 1 : f.ratio >= 1;
-    return { dimension: f.dim.title, label: f.item.displayLabel ?? f.item.label, metric: metric.label, ratio: f.ratio, worse: slower };
-  }), [findings, metric]);
-
-  const { panel: aiPanel } = useAIInsights(useCallback(() =>
-    analyzeHyperlyzer(aiFindings, frontend ?? "app", metric.label, tlEnabled),
-  [aiFindings, frontend, metric.label, tlEnabled]));
   const firstError = browser.error || os.error || geo.error || userAction.error || median.error || focusedFull.error;
 
   const findings = useMemo(() => {
@@ -400,6 +391,16 @@ export const HyperlyzerTab: React.FC = () => {
     }
     return top;
   }, [dimensions, appMedianMs]);
+
+  // AI Assist (must be after findings)
+  const aiFindings = useMemo(() => findings.map(f => {
+    const slower = metric.higherIsBetter ? f.ratio < 1 : f.ratio >= 1;
+    return { dimension: f.dim.title, label: f.item.displayLabel ?? f.item.label, metric: metric.label, ratio: f.ratio, worse: slower };
+  }), [findings, metric]);
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzeHyperlyzer(aiFindings, frontend ?? "app", metric.label, tlEnabled),
+  [aiFindings, frontend, metric.label, tlEnabled]));
 
   const focusedItems: DimensionItem[] = useMemo(
     () => toItems(focusedFull.data?.records, focusDim),
