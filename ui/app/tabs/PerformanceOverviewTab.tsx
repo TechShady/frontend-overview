@@ -1,10 +1,10 @@
 import React, { useMemo, useCallback } from "react";
 import { useAIInsights, analyzePerformanceOverview } from "../components/AIInsights";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
-import { useSettings } from "../SettingsContext";
+import { useSettings, CWV } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
-import { computeAppScore, computeFleetScore, PerAppSummary, PerAppVitals } from "../scoring";
+import { computeAppScore, computeFleetScore, scoreLowerBetter, PerAppSummary, PerAppVitals } from "../scoring";
 import { KpiCard } from "../components/KpiCard";
 import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
@@ -390,6 +390,26 @@ export const PerformanceOverviewTab: React.FC = () => {
   }, [tlIdx, fleetSparklines, totals, fleetVitals]);
   const spk = fleetSparklines;
 
+  // When timelapse is on, derive a proxy fleet grade from the current-bucket aggregate vitals.
+  const tlFleetScore = useMemo(() => {
+    if (tlIdx < 0 || !fleetSparklines) return NaN;
+    const i = tlIdx;
+    const lcp = fleetSparklines.lcp[i];
+    const inp = fleetSparklines.inp[i];
+    const cls = fleetSparklines.cls[i];
+    const err = fleetSparklines.errorRate[i];
+    const parts = [
+      (lcp != null && isFinite(lcp) && lcp > 0) ? { s: scoreLowerBetter(lcp, CWV.lcp.good, CWV.lcp.poor), w: 22 } : null,
+      (inp != null && isFinite(inp) && inp > 0) ? { s: scoreLowerBetter(inp, CWV.inp.good, CWV.inp.poor), w: 18 } : null,
+      (cls != null && isFinite(cls)) ? { s: scoreLowerBetter(cls, CWV.cls.good, CWV.cls.poor), w: 12 } : null,
+      (err != null && isFinite(err)) ? { s: scoreLowerBetter(err, 0.5, 5), w: 25 } : null,
+    ].filter((p): p is { s: number; w: number } => p !== null);
+    if (!parts.length) return NaN;
+    const wTotal = parts.reduce((a, p) => a + p.w, 0);
+    return parts.reduce((a, p) => a + p.s * p.w, 0) / wTotal;
+  }, [tlIdx, fleetSparklines]);
+  const displayFleetScore = (tlIdx >= 0 && isFinite(tlFleetScore)) ? tlFleetScore : fleetScore;
+
   return (
     <div>
       {aiPanel}
@@ -403,7 +423,7 @@ export const PerformanceOverviewTab: React.FC = () => {
       }}>
         {/* Fleet Grade — spans 3 rows */}
         <div style={{ gridColumn: "1 / 2", gridRow: "1 / span 3", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          <GradeBadge score={fleetScore} size={92} label="Fleet Grade" />
+          <GradeBadge score={displayFleetScore} size={92} label="Fleet Grade" />
           {isFinite(prevFleetScore) && (
             <div style={{ fontSize: 11, opacity: 0.65 }}>
               prev: <span style={{ color: gradeFromScore(prevFleetScore).color, fontWeight: 700 }}>{gradeFromScore(prevFleetScore).letter}</span> ({prevFleetScore.toFixed(0)})

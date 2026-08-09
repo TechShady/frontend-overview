@@ -125,36 +125,40 @@ export const CostRankingTab: React.FC = () => {
       {aiPanel}
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
         <KpiCard label="Estimated fleet cost" value={`$${totalCost.toFixed(2)}`} rawValue={totalCost} color="#FF832B" sparkline={spk?.actions} />
-        <KpiCard label="Most expensive web app" value={mostExpensive?.application ?? "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" rawValue={mostExpensive?.totalCost} sparkline={spk?.actions} />
+        <KpiCard label="Most expensive web app" value={mostExpensive ? (mostExpensive.application.length > 24 ? mostExpensive.application.slice(0, 23) + "…" : mostExpensive.application) : "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" rawValue={mostExpensive?.totalCost} sparkline={spk?.actions} />
         <KpiCard label="Cost / user action" value={`$${costPerAction.toFixed(5)}`} rawValue={costPerAction} color="#A56EFF" sparkline={spk?.actions} />
       </div>
 
       <SectionCard
         title="Cost model assumptions"
-        subtitle="These rates are illustrative. Adjust to match your CDN / observability contract for realistic numbers."
+        subtitle="These rates are illustrative. Adjust to match your CDN / observability contract for realistic numbers. Apps with $0 may lack resource-consumption data in your environment."
       >
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12 }}>
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12, alignItems: "flex-end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ opacity: 0.7 }}>Bandwidth ($/GB)</span>
             <input type="number" step="0.01" value={rateBandwidth} onChange={(e) => setRateBandwidth(Number(e.target.value))}
-              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 100 }} />
+              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 100, color: "white" }} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ opacity: 0.7 }}>Per HTTP request ($)</span>
             <input type="number" step="0.0000001" value={rateReq} onChange={(e) => setRateReq(Number(e.target.value))}
-              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 120 }} />
+              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 120, color: "white" }} />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ opacity: 0.7 }}>Per RUM action ($)</span>
             <input type="number" step="0.000001" value={rateRumEvent} onChange={(e) => setRateRumEvent(Number(e.target.value))}
-              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 120 }} />
+              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 120, color: "white" }} />
           </label>
+          <button
+            onClick={() => { setRateBandwidth(0.08); setRateReq(0.0000004); setRateRumEvent(0.00001); }}
+            style={{ padding: "4px 12px", background: "rgba(128,128,128,0.15)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, color: "white", cursor: "pointer", fontSize: 12 }}
+          >Reset defaults</button>
         </div>
       </SectionCard>
 
       <SectionCard
         title="Web-App Cost Leaderboard"
-        subtitle="Combined bandwidth + request + RUM-capture cost per web app. Ranked highest to lowest."
+        subtitle={`Combined bandwidth + request + RUM-capture cost per web app over the selected ${timeframeDays}-day timeframe. Ranked highest to lowest.`}
       >
         {consumption.loading ? <EmptyState loading /> : ranked.length === 0 ? <EmptyState /> : (
           <TimelapseTable

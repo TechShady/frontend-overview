@@ -14,7 +14,7 @@ import type { Timeframe } from "@dynatrace/strato-components/core";
 import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import {
   SettingsProvider, useSettings,
-  TIMEFRAME_OPTIONS, REFRESH_OPTIONS, ALL_TABS,
+  TIMEFRAME_OPTIONS, REFRESH_OPTIONS, ALL_TABS, NAV_FLOWS_SUB_TABS,
   setQueryAnchorMs, getQueryAnchorMs,
 } from "./SettingsContext";
 import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, SharedBucketMetrics } from "./TimelapseContext";
@@ -128,7 +128,7 @@ const AppHeader: React.FC<{
 
   return (
     <div style={{
-      position: "sticky", top: 0, zIndex: 50,
+      position: "sticky", top: 0, zIndex: 20,
       background: "var(--dt-colors-background-base-default, #0f1428)",
       borderBottom: "1px solid rgba(128,128,128,0.35)",
       padding: "10px 20px 8px 20px",
@@ -472,8 +472,8 @@ const HelpSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, o
 // Settings panel — tab visibility toggles + perf budgets
 // ---------------------------------------------------------------------------
 const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, onDismiss }) => {
-  const { tabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets } = useSettings();
-  const visibleCount = Object.values(tabVisibility).filter(Boolean).length;
+  const { tabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets, subTabVisibility, toggleSubTab } = useSettings();
+  const visibleCount = ALL_TABS.filter(t => tabVisibility[t] !== false).length;
 
   return (
     <Sheet title="Settings" show={show} onDismiss={onDismiss} actions={<Button variant="emphasized" onClick={onDismiss}>Close</Button>}>
@@ -495,17 +495,30 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
               { name: "Executive Summary", sub: null },
               { name: "Performance Overview", sub: null },
               { name: "Errors & Reliability", sub: null },
-              { name: "Navigation & Flows", sub: "Sub-tabs: Navigation Paths · Sankey · Geo Heatmap · Maps · Session Replay" },
+              { name: "Navigation & Flows", sub: "nav-flows" },
               { name: "Cost & Ranking", sub: null },
               { name: "Perf Budgets", sub: null },
               { name: "Hyperlyzer", sub: "Requires a single web app selected in the header" },
             ] as { name: string; sub: string | null }[]).map(({ name, sub }) => (
-              <div key={name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }} onClick={() => toggleTab(name)}>
-                <Switch value={!!tabVisibility[name]} onChange={() => toggleTab(name)} />
-                <div style={{ paddingTop: 2 }}>
-                  <span style={{ fontSize: 13, opacity: tabVisibility[name] ? 1 : 0.5, userSelect: "none" }}>{name}</span>
-                  {sub && <Text style={{ fontSize: 11, opacity: 0.5, display: "block", marginTop: 1 }}>{sub}</Text>}
+              <div key={name}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }} onClick={() => toggleTab(name)}>
+                  <Switch value={!!tabVisibility[name]} onChange={() => toggleTab(name)} />
+                  <div style={{ paddingTop: 2 }}>
+                    <span style={{ fontSize: 13, opacity: tabVisibility[name] ? 1 : 0.5, userSelect: "none" }}>{name}</span>
+                    {sub && sub !== "nav-flows" && <Text style={{ fontSize: 11, opacity: 0.5, display: "block", marginTop: 1 }}>{sub}</Text>}
+                  </div>
                 </div>
+                {sub === "nav-flows" && tabVisibility[name] && (
+                  <div style={{ marginLeft: 38, marginTop: 6, display: "flex", flexDirection: "column", gap: 5, padding: "8px 10px", background: "rgba(128,128,128,0.04)", borderRadius: 6, border: "1px solid rgba(128,128,128,0.12)" }}>
+                    <Text style={{ fontSize: 11, opacity: 0.5, marginBottom: 2 }}>Sub-tabs</Text>
+                    {NAV_FLOWS_SUB_TABS.map(({ id, label }) => (
+                      <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => toggleSubTab(id)}>
+                        <Switch value={subTabVisibility[id] !== false} onChange={() => toggleSubTab(id)} />
+                        <span style={{ fontSize: 12, opacity: subTabVisibility[id] !== false ? 0.9 : 0.4, userSelect: "none" }}>{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

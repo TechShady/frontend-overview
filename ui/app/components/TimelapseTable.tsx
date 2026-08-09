@@ -272,9 +272,7 @@ export function TimelapseTable<T extends Record<string, any>>({
       width: 110,
       sortType: "number" as const,
       cell: (info: any) => {
-        const row = info.row?.original as T | undefined;
-        const key = row ? rowKey(row) : "";
-        const delta = movementByKey[key];
+        const delta = info.value as number | null;
         if (delta == null) return <span style={{ opacity: 0.35, fontFamily: "monospace" }}>—</span>;
         if (delta === 0) return <span className="tl-move-arrow" style={{ color: "rgba(128,128,128,0.55)" }} title="No rank change">=</span>;
         if (delta > 0) {

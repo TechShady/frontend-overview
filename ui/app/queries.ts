@@ -503,9 +503,10 @@ export function geoFullQuery(days: number, selected: string | null): string {
         lcp_ms = toDouble(web_vitals.largest_contentful_paint) / 1000000.0,
         cls_v  = toDouble(web_vitals.cumulative_layout_shift),
         inp_ms = toDouble(web_vitals.interaction_to_next_paint) / 1000000.0,
-        isSat  = dur_ms <= 1000,
-        isTol  = dur_ms > 1000 and dur_ms <= 4000,
-        isFru  = dur_ms > 4000
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
+        isSat  = isAction and dur_ms <= 3000,
+        isTol  = isAction and dur_ms > 3000 and dur_ms <= 12000,
+        isFru  = isAction and dur_ms > 12000
     | summarize
         sessions   = countDistinct(dt.rum.session.id),
         actions    = count(),
@@ -535,9 +536,10 @@ export function geoFullBucketedQuery(days: number, selected: string | null, buck
         lcp_ms = toDouble(web_vitals.largest_contentful_paint) / 1000000.0,
         cls_v  = toDouble(web_vitals.cumulative_layout_shift),
         inp_ms = toDouble(web_vitals.interaction_to_next_paint) / 1000000.0,
-        isSat  = dur_ms <= 1000,
-        isTol  = dur_ms > 1000 and dur_ms <= 4000,
-        isFru  = dur_ms > 4000,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
+        isSat  = isAction and dur_ms <= 3000,
+        isTol  = isAction and dur_ms > 3000 and dur_ms <= 12000,
+        isFru  = isAction and dur_ms > 12000,
         bkt    = bin(start_time, ${label})
     | summarize
         sessions   = countDistinct(dt.rum.session.id),

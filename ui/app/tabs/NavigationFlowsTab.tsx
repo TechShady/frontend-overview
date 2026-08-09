@@ -1,5 +1,5 @@
 // NavigationFlowsTab — five sub-tabs:
-//   1. Navigation Paths  — force-directed SVG page-flow graph + tables
+//   1. Navigation Paths  — rectangular columnar flow graph + tables
 //   2. Sankey            — multi-format page-path flow visualization
 //   3. Geo Heatmap       — country performance cards + table
 //   4. Maps              — interactive world choropleth map + globe
@@ -11,7 +11,7 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useAIInsights, analyzeNavigation } from "../components/AIInsights";
-import { useSettings, CWV } from "../SettingsContext";
+import { useSettings, CWV, NAV_FLOWS_SUB_TABS } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { useTimelapse } from "../TimelapseContext";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
@@ -208,50 +208,9 @@ function SubTabBar<T extends string>({ tabs, active, onChange }: {
 }
 
 // ===========================================================================
-// SUB-TAB 1: Navigation Paths — force-directed graph + tables
+// SUB-TAB 1: Navigation Paths — rectangular columnar graph + tables
+// (Graph layout ported from user-journey-app NavigationPathsTab)
 // ===========================================================================
-
-interface ForceNode { id: string; label: string; x: number; y: number; r: number; sessions: number; errRate: number; }
-interface ForceEdge { source: string; target: string; weight: number; }
-
-function layoutForce(nodes: ForceNode[], edges: ForceEdge[], W: number, H: number, iters = 200): ForceNode[] {
-  const ns = nodes.map(n => ({ ...n, vx: 0, vy: 0 }));
-  const idx = new Map<string, number>();
-  ns.forEach((n, i) => idx.set(n.id, i));
-  const k = Math.sqrt((W * H) / Math.max(1, ns.length)) * 0.85;
-  for (let it = 0; it < iters; it++) {
-    const alpha = 1 - it / iters;
-    for (let i = 0; i < ns.length; i++) {
-      let fx = 0, fy = 0;
-      for (let j = 0; j < ns.length; j++) {
-        if (i === j) continue;
-        const dx = (ns[i].x - ns[j].x) || 0.01;
-        const dy = (ns[i].y - ns[j].y) || 0.01;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const f = (k * k) / dist;
-        fx += (dx / dist) * f; fy += (dy / dist) * f;
-      }
-      ns[i].vx = (ns[i].vx + fx * 0.01 * alpha) * 0.85;
-      ns[i].vy = (ns[i].vy + fy * 0.01 * alpha) * 0.85;
-    }
-    for (const e of edges) {
-      const si = idx.get(e.source); const ti = idx.get(e.target);
-      if (si == null || ti == null) continue;
-      const s = ns[si]; const t = ns[ti];
-      const dx = t.x - s.x; const dy = t.y - s.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const str = Math.log1p(e.weight) * 0.5;
-      const f = (dist / k) * str * 0.3 * alpha;
-      const fx = (dx / dist) * f; const fy = (dy / dist) * f;
-      s.vx += fx; s.vy += fy; t.vx -= fx; t.vy -= fy;
-    }
-    for (const n of ns) {
-      n.x = Math.max(n.r + 4, Math.min(W - n.r - 4, n.x + n.vx));
-      n.y = Math.max(n.r + 4, Math.min(H - n.r - 4, n.y + n.vy));
-    }
-  }
-  return ns;
-}
 
 const NavigationPathsSubTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
@@ -263,7 +222,7 @@ const NavigationPathsSubTab: React.FC = () => {
   const pageBucketed = useDql(pagesBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
   const pageSpk = useBucketedSums(pageBucketed.data?.records, ["views", "errors"] as const);
   const [minTransitions, setMinTransitions] = useState(3);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [selectedFlow, setSelectedFlow] = useState<{ src: string; tgt: string } | null>(null);
 
   const pageRows = useMemo(() =>
     (pages.data?.records ?? []).map((r: any) => ({
@@ -292,49 +251,111 @@ const NavigationPathsSubTab: React.FC = () => {
     return Object.values(agg).sort((a, b) => b.transitions - a.transitions).filter(r => r.transitions >= minTransitions);
   }, [transitions.data, minTransitions]);
 
-  // Build force graph
+  // Build columnar graph (rectangular nodes in columns — ported from user-journey-app NavigationPathsTab)
   const graphData = useMemo(() => {
-    const W = 960; const H = 520;
-    const sessByPage = new Map<string, number>();
-    const errByPage = new Map<string, number>();
+    if (transitionRows.length === 0) return null;
+
+    const allPages = new Set<string>();
+    transitionRows.forEach(t => { allPages.add(t.from); allPages.add(t.to); });
+
+    // Build in/out degree from transitions
+    const inDeg = new Map<string, number>();
+    const outDeg = new Map<string, number>();
+    transitionRows.forEach(t => {
+      outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + t.transitions);
+      inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + t.transitions);
+    });
+
+    // View counts and error rate per page (for node display)
     const viewsByPage = new Map<string, number>();
+    const errRateByPage = new Map<string, number>();
     pageRows.forEach(r => {
-      sessByPage.set(r.name, (sessByPage.get(r.name) ?? 0) + r.views);
-      errByPage.set(r.name, (errByPage.get(r.name) ?? 0) + r.errors);
       viewsByPage.set(r.name, (viewsByPage.get(r.name) ?? 0) + r.views);
+      errRateByPage.set(r.name, r.errRate);
     });
-    const edgeAgg = new Map<string, number>();
-    (transitions.data?.records ?? []).forEach((r: any) => {
-      const path: string[] = Array.isArray(r.path) ? r.path : [];
-      for (let i = 0; i < path.length - 1; i++) {
-        const from = String(path[i] ?? ""); const to = String(path[i + 1] ?? "");
-        if (!from || !to || from === to) continue;
-        const key = `${from}|||${to}`;
-        edgeAgg.set(key, (edgeAgg.get(key) ?? 0) + 1);
+
+    // Assign layers via BFS from entry pages (pages with no incoming transitions)
+    const pageLayer = new Map<string, number>();
+    for (const page of allPages) {
+      if ((inDeg.get(page) ?? 0) === 0 && (outDeg.get(page) ?? 0) > 0) pageLayer.set(page, 0);
+    }
+    // Fallback: no clear entry pages — seed layer 0 with top 2 pages by views
+    if (pageLayer.size === 0) {
+      Array.from(allPages)
+        .sort((a, b) => (viewsByPage.get(b) ?? 0) - (viewsByPage.get(a) ?? 0))
+        .slice(0, 2)
+        .forEach(p => pageLayer.set(p, 0));
+    }
+    // BFS forward (4 passes, mirroring user-journey-app's multi-pass approach)
+    for (let pass = 0; pass < 4; pass++) {
+      for (const t of transitionRows) {
+        const l = pageLayer.get(t.from);
+        if (l !== undefined && !pageLayer.has(t.to)) pageLayer.set(t.to, l + 1);
       }
+    }
+    // Assign remaining unresolved pages to the middle layer
+    const maxAssigned = pageLayer.size > 0 ? Math.max(...Array.from(pageLayer.values())) : 0;
+    for (const page of allPages) {
+      if (!pageLayer.has(page)) pageLayer.set(page, Math.floor(maxAssigned / 2));
+    }
+    // Cap at 7 layers to keep the diagram legible
+    for (const [p, l] of pageLayer) pageLayer.set(p, Math.min(7, l));
+
+    // Group pages by layer, sort by transition volume, cap at 6 per column
+    const MAX_PER_LAYER = 6;
+    const layerPagesMap = new Map<number, { name: string; volume: number }[]>();
+    for (const [page, layer] of pageLayer) {
+      const vol = (inDeg.get(page) ?? 0) + (outDeg.get(page) ?? 0);
+      const arr = layerPagesMap.get(layer) ?? [];
+      arr.push({ name: page, volume: vol });
+      layerPagesMap.set(layer, arr);
+    }
+    for (const [, arr] of layerPagesMap) arr.sort((a, b) => b.volume - a.volume);
+    const layerDisplayPages = new Map<number, { name: string; volume: number }[]>();
+    for (const [layer, arr] of layerPagesMap) layerDisplayPages.set(layer, arr.slice(0, MAX_PER_LAYER));
+
+    // Layout constants (from user-journey-app)
+    const nodeW = 220, nodeH = 52, padX = 60, padY = 20, colWidth = nodeW + 140;
+    const layers = Array.from(layerDisplayPages.keys()).sort((a, b) => a - b);
+    const numLayers = layers.length || 1;
+    const W = padX * 2 + numLayers * colWidth;
+    const maxLayerNodes = Math.max(...Array.from(layerDisplayPages.values()).map(a => a.length), 1);
+    const H = Math.max(450, maxLayerNodes * (nodeH + padY) + 100);
+
+    // Compute node positions
+    const nodePos = new Map<string, { x: number; y: number; h: number; views: number; errRate: number }>();
+    const visiblePages = new Set<string>();
+    layers.forEach((layer, li) => {
+      const arr = layerDisplayPages.get(layer) ?? [];
+      const totalH = arr.length * nodeH + Math.max(0, arr.length - 1) * padY;
+      const startY = (H - totalH) / 2;
+      let yOff = startY;
+      arr.forEach(p => {
+        nodePos.set(p.name, {
+          x: padX + li * colWidth,
+          y: yOff,
+          h: nodeH,
+          views: viewsByPage.get(p.name) ?? 0,
+          errRate: errRateByPage.get(p.name) ?? 0,
+        });
+        visiblePages.add(p.name);
+        yOff += nodeH + padY;
+      });
     });
-    const edgesRaw = Array.from(edgeAgg.entries())
-      .filter(([, w]) => w >= minTransitions)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 80);
-    const pageSet = new Set<string>();
-    edgesRaw.forEach(([k]) => { const [f, t] = k.split("|||"); pageSet.add(f); pageSet.add(t); });
-    const maxViews = Math.max(1, ...Array.from(pageSet).map(p => viewsByPage.get(p) ?? 0));
-    const seed = (i: number) => { const ang = (i * 2.39996) * Math.PI * 2; const r2 = 0.4 + (i / Math.max(1, pageSet.size)) * 0.5; return [W / 2 + Math.cos(ang) * r2 * W * 0.45, H / 2 + Math.sin(ang) * r2 * H * 0.45]; };
-    const forceNodes: ForceNode[] = Array.from(pageSet).map((p, i) => {
-      const views = viewsByPage.get(p) ?? 0;
-      const errs = errByPage.get(p) ?? 0;
-      const errRate = views > 0 ? (errs / views) * 100 : 0;
-      const [x, y] = seed(i);
-      return { id: p, label: p, x, y, r: 8 + Math.sqrt(views / maxViews) * 22, sessions: views, errRate };
+
+    // Build links between visible nodes (forward links only)
+    const links: { src: string; tgt: string; value: number }[] = [];
+    transitionRows.forEach(t => {
+      if (!visiblePages.has(t.from) || !visiblePages.has(t.to) || t.from === t.to) return;
+      const sl = pageLayer.get(t.from) ?? 0;
+      const tl2 = pageLayer.get(t.to) ?? 0;
+      if (tl2 >= sl) links.push({ src: t.from, tgt: t.to, value: t.transitions });
     });
-    const forceEdges: ForceEdge[] = edgesRaw.map(([k, w]) => {
-      const [source, target] = k.split("|||");
-      return { source, target, weight: w };
-    });
-    const laid = layoutForce(forceNodes, forceEdges, W, H);
-    return { nodes: laid, edges: forceEdges, W, H };
-  }, [pageRows, transitions.data, minTransitions]);
+    const sortedLinks = links.sort((a, b) => b.value - a.value).slice(0, 50);
+    const maxLinkVal = Math.max(...sortedLinks.map(l => l.value), 1);
+
+    return { nodePos, sortedLinks, maxLinkVal, W, H, nodeW, nodeH, layers, padX, colWidth };
+  }, [pageRows, transitionRows]);
 
   const totalViews = pageRows.reduce((a, r) => a + r.views, 0);
   const uniquePages = new Set(pageRows.map(r => r.name)).size;
@@ -362,7 +383,8 @@ const NavigationPathsSubTab: React.FC = () => {
     { value: "errRate",     label: "Err %",        get: r => r.errRate,     higherIsBetter: false },
   ], []);
 
-  const nodeColorOf = (n: ForceNode) => n.errRate > 5 ? RED : n.errRate > 1 ? YELLOW : BLUE;
+  const nodeColorOf = (errRate: number) => errRate > 5 ? RED : errRate > 1 ? YELLOW : BLUE;
+  const LINK_COLORS = [BLUE, CYAN, PURPLE, GREEN, ORANGE, YELLOW];
 
   return (
     <div>
@@ -372,58 +394,96 @@ const NavigationPathsSubTab: React.FC = () => {
         <KpiCard label="Transitions shown" value={fmt.num(transitionRows.length)} rawValue={transitionRows.length} color="#A56EFF" sparkline={pageSpk?.views} />
       </div>
 
-      {/* Force-directed graph */}
-      <SectionCard title="Page Flow Graph" subtitle="Force-directed layout — node size = page views, color = error rate. Edges = navigation transitions.">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, padding: "0 4px" }}>
+      {/* Columnar Navigation Flow Graph — layout ported from user-journey-app NavigationPathsTab */}
+      <SectionCard title="Navigation Flow Graph" subtitle="Rectangular columnar layout — columns represent navigation steps. Node color = error rate. Edge thickness = transition volume.">
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, padding: "0 4px", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, opacity: 0.6 }}>Min transitions:</span>
           <input type="range" min={1} max={30} value={minTransitions} onChange={e => setMinTransitions(Number(e.target.value))} style={{ width: 120 }} />
           <span style={{ fontSize: 12, fontWeight: 700 }}>{minTransitions}</span>
           <div style={{ display: "flex", gap: 16, marginLeft: 16, fontSize: 11, opacity: 0.7 }}>
-            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: BLUE, marginRight: 4 }} />Low err</span>
-            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: YELLOW, marginRight: 4 }} />&gt;1%</span>
-            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: RED, marginRight: 4 }} />&gt;5%</span>
+            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: BLUE, marginRight: 4 }} />Low err</span>
+            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: YELLOW, marginRight: 4 }} />&gt;1%</span>
+            <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: RED, marginRight: 4 }} />&gt;5%</span>
           </div>
+          {selectedFlow && (
+            <button onClick={() => setSelectedFlow(null)} style={{ marginLeft: "auto", background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4, color: "rgba(255,255,255,0.7)", cursor: "pointer", padding: "2px 10px", fontSize: 12 }}>Clear selection</button>
+          )}
         </div>
         {(pages.loading || transitions.loading) ? <EmptyState loading /> :
-          graphData.nodes.length === 0 ? <EmptyState error="No page transition data available" /> : (
+          !graphData ? <EmptyState error="No page transition data available" /> : (
           <div style={{ overflowX: "auto" }}>
-            <svg width={graphData.W} height={graphData.H} style={{ display: "block", background: "rgba(6,10,20,0.95)", borderRadius: 8 }}>
-              <defs>
-                <marker id="navpath-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L0,6 L6,3 z" fill="rgba(255,255,255,0.25)" />
-                </marker>
-              </defs>
-              {/* Edges */}
-              {graphData.edges.map((e, i) => {
-                const sn = graphData.nodes.find(n => n.id === e.source);
-                const tn = graphData.nodes.find(n => n.id === e.target);
-                if (!sn || !tn) return null;
-                const isHovered = hoveredNode === e.source || hoveredNode === e.target;
-                const alpha = isHovered ? 0.7 : 0.18;
-                const maxW = Math.max(...graphData.edges.map(ex => ex.weight));
-                const sw = 0.5 + (e.weight / maxW) * 3;
+            <svg width={graphData.W} height={graphData.H}
+              style={{ display: "block", background: "rgba(6,10,20,0.95)", borderRadius: 8 }}
+              onClick={() => setSelectedFlow(null)}>
+              {/* Column step labels */}
+              {graphData.layers.map((_, li) => (
+                <text key={`col-${li}`}
+                  x={graphData.padX + li * graphData.colWidth + graphData.nodeW / 2}
+                  y={18}
+                  textAnchor="middle"
+                  fill="rgba(255,255,255,0.35)"
+                  fontSize={10}
+                  fontWeight={600}
+                >
+                  {`Step ${li + 1}`}
+                </text>
+              ))}
+              {/* Links (bezier curves, like user-journey-app) */}
+              {graphData.sortedLinks.map((link, i) => {
+                const sp = graphData.nodePos.get(link.src);
+                const tp = graphData.nodePos.get(link.tgt);
+                if (!sp || !tp) return null;
+                const thickness = Math.max(1.5, (link.value / graphData.maxLinkVal) * 14);
+                const x1 = sp.x + graphData.nodeW;
+                const x2 = tp.x;
+                const y1 = sp.y + sp.h / 2;
+                const y2 = tp.y + tp.h / 2;
+                const cx1 = x1 + (x2 - x1) * 0.4;
+                const cx2 = x1 + (x2 - x1) * 0.6;
+                const color = LINK_COLORS[i % LINK_COLORS.length];
+                const isSelected = selectedFlow?.src === link.src && selectedFlow?.tgt === link.tgt;
+                const hasFocus = selectedFlow !== null;
+                const opacity = hasFocus ? (isSelected ? 0.9 : 0.06) : 0.35;
                 return (
-                  <line key={i} x1={sn.x} y1={sn.y} x2={tn.x} y2={tn.y}
-                    stroke={`rgba(255,255,255,${alpha})`} strokeWidth={sw}
-                    markerEnd="url(#navpath-arrow)" />
+                  <path key={i}
+                    d={`M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={isSelected ? thickness * 1.4 : thickness}
+                    strokeOpacity={opacity}
+                    style={{ cursor: "pointer", transition: "stroke-opacity 0.2s" }}
+                    onClick={e => { e.stopPropagation(); setSelectedFlow(prev => prev?.src === link.src && prev?.tgt === link.tgt ? null : { src: link.src, tgt: link.tgt }); }}
+                  >
+                    <title>{`${link.src} → ${link.tgt}: ${fmtCount(link.value)} transitions`}</title>
+                  </path>
                 );
               })}
-              {/* Nodes */}
-              {graphData.nodes.map(n => {
-                const isHov = hoveredNode === n.id;
-                const col = nodeColorOf(n);
+              {/* Nodes (rectangles, like user-journey-app) */}
+              {Array.from(graphData.nodePos.entries()).map(([name, pos]) => {
+                const color = nodeColorOf(pos.errRate);
+                const shortName = name.length > 26 ? name.substring(0, 24) + "…" : name;
+                const isSelected = selectedFlow?.src === name || selectedFlow?.tgt === name;
+                const hasFocus = selectedFlow !== null;
+                const nodeOpacity = hasFocus ? (isSelected ? 1 : 0.15) : 1;
                 return (
-                  <g key={n.id} onMouseEnter={() => setHoveredNode(n.id)} onMouseLeave={() => setHoveredNode(null)} style={{ cursor: "default" }}>
-                    <circle cx={n.x} cy={n.y} r={n.r} fill={`${col}22`} stroke={col} strokeWidth={isHov ? 2 : 1} />
-                    {isHov && <circle cx={n.x} cy={n.y} r={n.r + 4} fill="none" stroke={col} strokeWidth={1} strokeDasharray="3 3" />}
-                    {n.r >= 14 && (
-                      <text x={n.x} y={n.y + 1} textAnchor="middle" dominantBaseline="middle"
-                        fontSize={Math.max(8, Math.min(11, n.r * 0.5))} fill="rgba(255,255,255,0.85)"
-                        style={{ pointerEvents: "none", userSelect: "none" }}>
-                        {n.label.length > 18 ? n.label.slice(0, 16) + "…" : n.label}
-                      </text>
-                    )}
-                    <title>{n.label}\nViews: {fmtCount(n.sessions)}\nErr rate: {fmtPct(n.errRate)}</title>
+                  <g key={name} style={{ opacity: nodeOpacity, transition: "opacity 0.2s", cursor: "default" }}>
+                    <rect
+                      x={pos.x} y={pos.y} width={graphData.nodeW} height={pos.h} rx={6}
+                      fill={`${color}18`}
+                      stroke={color}
+                      strokeWidth={1.5}
+                      strokeOpacity={0.85}
+                    />
+                    <text x={pos.x + 10} y={pos.y + 18}
+                      fontSize={12} fill={color} fontWeight={700}
+                      style={{ dominantBaseline: "middle" } as any}>
+                      {shortName}
+                    </text>
+                    <text x={pos.x + 10} y={pos.y + 38}
+                      fontSize={10} fill="rgba(255,255,255,0.65)">
+                      {`${fmtCount(pos.views)} views${pos.errRate > 0 ? ` · ${fmtPct(pos.errRate)} err` : ""}`}
+                    </text>
+                    <title>{`${name}\nViews: ${fmtCount(pos.views)}\nErr rate: ${fmtPct(pos.errRate)}`}</title>
                   </g>
                 );
               })}
@@ -2028,7 +2088,7 @@ const NAV_FLOWS_TABS: { id: NavFlowsSubTab; label: string }[] = [
 
 export const NavigationFlowsTab: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavFlowsSubTab>("paths");
-  const { timeframeDays, webAppFilter } = useSettings();
+  const { timeframeDays, webAppFilter, subTabVisibility } = useSettings();
   const sel = webAppFilter.selected;
 
   const topPagesResult = useDql(topPagesQuery(timeframeDays, sel), [timeframeDays, sel]);
@@ -2047,15 +2107,30 @@ export const NavigationFlowsTab: React.FC = () => {
     analyzeNavigation(navStats.totalSessions, navStats.uniquePages, navStats.totalTransitions),
   [navStats]));
 
+  const visibleSubTabs = useMemo(() =>
+    NAV_FLOWS_TABS.filter(t => subTabVisibility[t.id] !== false),
+  [subTabVisibility]);
+
+  // If the active sub-tab was hidden, switch to the first visible one
+  const effectiveTab = visibleSubTabs.some(t => t.id === activeTab)
+    ? activeTab
+    : (visibleSubTabs[0]?.id ?? "paths") as NavFlowsSubTab;
+
   return (
     <div>
       {aiPanel}
-      <SubTabBar tabs={NAV_FLOWS_TABS} active={activeTab} onChange={setActiveTab} />
-      {activeTab === "paths"  && <NavigationPathsSubTab />}
-      {activeTab === "sankey" && <SankeySubTab />}
-      {activeTab === "geo"    && <GeoHeatmapSubTab />}
-      {activeTab === "maps"   && <WorldMapSubTab />}
-      {activeTab === "replay" && <SessionReplaySubTab />}
+      {visibleSubTabs.length > 0 ? (
+        <>
+          <SubTabBar tabs={visibleSubTabs} active={effectiveTab} onChange={setActiveTab} />
+          {effectiveTab === "paths"  && <NavigationPathsSubTab />}
+          {effectiveTab === "sankey" && <SankeySubTab />}
+          {effectiveTab === "geo"    && <GeoHeatmapSubTab />}
+          {effectiveTab === "maps"   && <WorldMapSubTab />}
+          {effectiveTab === "replay" && <SessionReplaySubTab />}
+        </>
+      ) : (
+        <div style={{ padding: 40, textAlign: "center", opacity: 0.5 }}>All sub-tabs hidden. Re-enable them in Settings.</div>
+      )}
     </div>
   );
 };

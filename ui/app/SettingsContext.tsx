@@ -13,6 +13,14 @@ export const ALL_TABS: string[] = [
   "Hyperlyzer",
 ];
 
+export const NAV_FLOWS_SUB_TABS: { id: string; label: string }[] = [
+  { id: "paths",  label: "Navigation Paths" },
+  { id: "sankey", label: "Sankey" },
+  { id: "geo",    label: "Geo Heatmap" },
+  { id: "maps",   label: "Maps" },
+  { id: "replay", label: "Session Replay" },
+];
+
 export const TIMEFRAME_OPTIONS: { label: string; value: number }[] = [
   { label: "Last 2 hours", value: 2 / 24 },
   { label: "Last 24 hours", value: 1 },
@@ -65,16 +73,26 @@ type SettingsCtx = {
   setTabVisibility: (v: Record<string, boolean>) => void;
   toggleTab: (name: string) => void;
   resetTabVisibility: () => void;
+  subTabVisibility: Record<string, boolean>;
+  toggleSubTab: (id: string) => void;
+  resetSubTabVisibility: () => void;
 };
 
 const SettingsContext = createContext<SettingsCtx | null>(null);
 
 const TAB_VIS_KEY = "fo-tab-visibility";
 const PREFS_KEY = "fo-prefs-v1";
+const SUB_TAB_VIS_KEY = "fo-subtab-vis";
 
 function defaultTabVisibility(): Record<string, boolean> {
   const rec: Record<string, boolean> = {};
   ALL_TABS.forEach((t) => { rec[t] = true; });
+  return rec;
+}
+
+function defaultSubTabVisibility(): Record<string, boolean> {
+  const rec: Record<string, boolean> = {};
+  NAV_FLOWS_SUB_TABS.forEach((t) => { rec[t.id] = true; });
   return rec;
 }
 
@@ -84,8 +102,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(0);
   const [budgets, setBudgets] = useState(DEFAULT_PERF_BUDGETS);
   const [tabVisibility, setTabVisibility] = useState<Record<string, boolean>>(defaultTabVisibility);
+  const [subTabVisibility, setSubTabVisibility] = useState<Record<string, boolean>>(defaultSubTabVisibility);
 
   const tabVisState = useUserAppState({ key: TAB_VIS_KEY });
+  const subTabVisState = useUserAppState({ key: SUB_TAB_VIS_KEY });
   const prefsState = useUserAppState({ key: PREFS_KEY });
   const { execute: saveState } = useSetUserAppState();
 
@@ -113,8 +133,22 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [prefsState.isLoading, prefsState.data?.value]);
 
   useEffect(() => {
+    if (subTabVisState.isLoading) return;
+    const raw = subTabVisState.data?.value;
+    if (!raw) return;
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      setSubTabVisibility({ ...defaultSubTabVisibility(), ...parsed });
+    } catch { /* noop */ }
+  }, [subTabVisState.isLoading, subTabVisState.data?.value]);
+
+  useEffect(() => {
     saveState({ key: TAB_VIS_KEY, body: { value: JSON.stringify(tabVisibility) } });
   }, [tabVisibility]);
+
+  useEffect(() => {
+    saveState({ key: SUB_TAB_VIS_KEY, body: { value: JSON.stringify(subTabVisibility) } });
+  }, [subTabVisibility]);
 
   useEffect(() => {
     saveState({ key: PREFS_KEY, body: { value: JSON.stringify({ timeframeDays, refreshIntervalMs, budgets, webAppFilter }) } });
@@ -122,6 +156,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const toggleTab = (name: string) => setTabVisibility((v) => ({ ...v, [name]: !v[name] }));
   const resetTabVisibility = () => setTabVisibility(defaultTabVisibility());
+  const toggleSubTab = (id: string) => setSubTabVisibility((v) => ({ ...v, [id]: !v[id] }));
+  const resetSubTabVisibility = () => setSubTabVisibility(defaultSubTabVisibility());
 
   const value = useMemo(() => ({
     timeframeDays, setTimeframeDays,
@@ -129,7 +165,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshIntervalMs, setRefreshIntervalMs,
     budgets, setBudgets,
     tabVisibility, setTabVisibility, toggleTab, resetTabVisibility,
-  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, tabVisibility]);
+    subTabVisibility, toggleSubTab, resetSubTabVisibility,
+  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, tabVisibility, subTabVisibility]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 };
