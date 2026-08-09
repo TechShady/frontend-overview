@@ -16,6 +16,9 @@ export type PerAppSummary = {
   newUsers: number;
   errorRate: number;
   bounceRate: number;
+  satisfied?: number;
+  tolerating?: number;
+  frustrated?: number;
 };
 
 export type PerAppVitals = {
@@ -45,15 +48,22 @@ export function computeAppScore(
   const inp = vitals?.inpAvg ?? NaN;
   const ttfb = vitals?.ttfbAvg ?? NaN;
   const err = summary?.errorRate ?? NaN;
-  const bounce = summary?.bounceRate ?? NaN;
+  const sat = summary?.satisfied ?? NaN;
+  const tol = summary?.tolerating ?? NaN;
+  const fru = summary?.frustrated ?? NaN;
+  const apdexDen = isFinite(sat) && isFinite(tol) && isFinite(fru) ? sat + tol + fru : NaN;
+  const apdex = apdexDen > 0 ? (sat + tol * 0.5) / apdexDen : NaN;
+  const apdexScore = isFinite(apdex)
+    ? Math.max(0, Math.min(100, 100 * (apdex - 0.5) / (0.94 - 0.5)))
+    : NaN;
 
   const parts = [
-    { label: "LCP", score: scoreLowerBetter(lcp, CWV.lcp.good, CWV.lcp.poor), weight: 22 },
-    { label: "INP", score: scoreLowerBetter(inp, CWV.inp.good, CWV.inp.poor), weight: 18 },
-    { label: "CLS", score: scoreLowerBetter(cls, CWV.cls.good, CWV.cls.poor), weight: 12 },
-    { label: "TTFB", score: scoreLowerBetter(ttfb, CWV.ttfb.good, CWV.ttfb.poor), weight: 8 },
-    { label: "Error rate", score: scoreLowerBetter(err, 0.5, 5), weight: 25 },
-    { label: "Bounce rate", score: scoreLowerBetter(bounce, 30, 80), weight: 15 },
+    { label: "LCP",        score: scoreLowerBetter(lcp, CWV.lcp.good, CWV.lcp.poor), weight: 20 },
+    { label: "INP",        score: scoreLowerBetter(inp, CWV.inp.good, CWV.inp.poor), weight: 16 },
+    { label: "CLS",        score: scoreLowerBetter(cls, CWV.cls.good, CWV.cls.poor), weight: 10 },
+    { label: "TTFB",       score: scoreLowerBetter(ttfb, CWV.ttfb.good, CWV.ttfb.poor), weight: 7 },
+    { label: "Error rate", score: scoreLowerBetter(err, 0.5, 5), weight: 22 },
+    { label: "Apdex",      score: apdexScore, weight: 25 },
   ];
   const applicable = parts.filter((p) => isFinite(p.score));
   const wTotal = applicable.reduce((a, p) => a + p.weight, 0) || 1;

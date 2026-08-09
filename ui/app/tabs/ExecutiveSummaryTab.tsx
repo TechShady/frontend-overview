@@ -76,23 +76,27 @@ const SectionHeader: React.FC<{ title: string; subtitle?: string; icon?: React.R
 // -----------------------------------------------------------------------------
 const GradeMetricRow: React.FC<{
   label: string; weight: number; score: number; displayValue: string; color: string;
-}> = ({ label, weight, score, displayValue, color }) => {
+  subtext?: React.ReactNode;
+}> = ({ label, weight, score, displayValue, color, subtext }) => {
   const clamped = Math.max(0, Math.min(100, isFinite(score) ? score : 0));
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0", borderBottom: "1px solid rgba(128,128,128,0.15)" }}>
-      <div style={{ width: 130, fontSize: 12, fontWeight: 600 }}>
-        {label}
-        <span style={{ opacity: 0.55, fontWeight: 500, marginLeft: 6 }}>({weight}%)</span>
+    <div style={{ padding: "6px 0", borderBottom: "1px solid rgba(128,128,128,0.15)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 130, fontSize: 12, fontWeight: 600 }}>
+          {label}
+          <span style={{ opacity: 0.55, fontWeight: 500, marginLeft: 6 }}>({weight}%)</span>
+        </div>
+        <div style={{ flex: 1, height: 8, background: "rgba(128,128,128,0.15)", borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${clamped}%`, background: color, transition: "width .35s ease" }} />
+        </div>
+        <div style={{ width: 96, textAlign: "right", fontSize: 12, fontFamily: "monospace", color, fontWeight: 700 }}>
+          {displayValue}
+        </div>
+        <div style={{ width: 44, textAlign: "right", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
+          {isFinite(score) ? `${clamped.toFixed(0)}/100` : "—"}
+        </div>
       </div>
-      <div style={{ flex: 1, height: 8, background: "rgba(128,128,128,0.15)", borderRadius: 4, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${clamped}%`, background: color, transition: "width .35s ease" }} />
-      </div>
-      <div style={{ width: 96, textAlign: "right", fontSize: 12, fontFamily: "monospace", color, fontWeight: 700 }}>
-        {displayValue}
-      </div>
-      <div style={{ width: 44, textAlign: "right", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
-        {isFinite(score) ? `${clamped.toFixed(0)}/100` : "—"}
-      </div>
+      {subtext && <div style={{ paddingLeft: 142, marginTop: 3 }}>{subtext}</div>}
     </div>
   );
 };
@@ -297,49 +301,52 @@ export const ExecutiveSummaryTab: React.FC = () => {
         fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
       };
       const { score } = computeAppScore(vitalsRow, summary);
-      return { application: app, score, apdex: summary.apdex, errorRate: summary.errorRate, avgDuration: summary.avgDuration };
+      return {
+        application: app, score,
+        apdex: summary.apdex, errorRate: summary.errorRate, avgDuration: summary.avgDuration,
+        satisfied: summary.satisfied, tolerating: summary.tolerating, frustrated: summary.frustrated,
+      };
     });
   }, [prevByApp, prevVitals.data]);
 
-  // Business Impact bullets (#3)
-  const impactBullets = useMemo(() => {
-    const bullets: { text: string; positive: boolean }[] = [];
-    if (prevTotals.sessions < 10) return bullets;
-    const sessionDelta = totals.sessions - prevTotals.sessions;
-    const sessionPct = (Math.abs(sessionDelta) / prevTotals.sessions) * 100;
-    if (sessionPct >= 5) bullets.push({
-      text: `${sessionDelta > 0 ? "+" : ""}${Math.round(sessionPct)}% sessions vs prior period — ${fmt.num(Math.abs(sessionDelta))} ${sessionDelta > 0 ? "more" : "fewer"} visitors`,
-      positive: sessionDelta > 0,
-    });
-    if (prevTotals.actions > 0) {
-      const rateDelta = totals.errorRate - prevTotals.errorRate;
-      if (Math.abs(rateDelta) >= 0.2) {
-        const affected = Math.abs(Math.round((rateDelta / 100) * totals.sessions));
-        bullets.push({
-          text: `Error rate ${rateDelta > 0 ? "up" : "down"} ${Math.abs(rateDelta).toFixed(1)}pp — ~${fmt.num(affected)} ${rateDelta > 0 ? "more" : "fewer"} sessions hit errors`,
-          positive: rateDelta < 0,
-        });
-      }
+  // Business Impact stats (#3) — always shown; delta shown when prior period data exists
+  const impactStats = useMemo(() => {
+    const hasPrev = prevTotals.sessions >= 5 && prevTotals.actions >= 5;
+    function delta(curr: number, prev: number, fmt2: (v: number) => string, higherBetter: boolean) {
+      if (!hasPrev || !isFinite(prev) || prev === 0) return null;
+      const d = curr - prev;
+      if (Math.abs(d) < 1e-6) return { label: "stable", positive: true, neutral: true };
+      return { label: (d > 0 ? "+" : "") + fmt2(d), positive: higherBetter ? d > 0 : d < 0, neutral: false };
     }
-    if (isFinite(totals.apdex) && isFinite(prevTotals.apdex)) {
-      const delta = totals.apdex - prevTotals.apdex;
-      if (Math.abs(delta) >= 0.03) {
-        const fruDelta = Math.abs(Math.round(delta * totals.sessions));
-        bullets.push({
-          text: `Apdex ${delta > 0 ? "improved" : "declined"} ${Math.abs(delta * 100).toFixed(0)} pts — ~${fmt.num(fruDelta)} ${delta < 0 ? "more frustrated" : "fewer frustrated"} sessions`,
-          positive: delta > 0,
-        });
-      }
-    }
-    if (isFinite(totals.avgDur) && isFinite(prevTotals.avgDur) && prevTotals.avgDur > 0) {
-      const delta = totals.avgDur - prevTotals.avgDur;
-      const pct = Math.abs((delta / prevTotals.avgDur) * 100);
-      if (pct >= 10 && Math.abs(delta) >= 300) bullets.push({
-        text: `Avg load time ${delta > 0 ? "up" : "down"} ${Math.abs(delta / 1000).toFixed(1)}s — users ${delta > 0 ? "waiting longer" : "experiencing faster pages"}`,
-        positive: delta < 0,
-      });
-    }
-    return bullets;
+    const errCount = totals.errors;
+    const prevErrCount = hasPrev ? Math.round((prevTotals.errorRate / 100) * prevTotals.actions) : 0;
+    const errDelta = hasPrev ? errCount - prevErrCount : 0;
+    return [
+      {
+        label: "Sessions",
+        value: fmt.num(totals.sessions),
+        delta: delta(totals.sessions, prevTotals.sessions, (v) => `${Math.abs(Math.round((v / prevTotals.sessions) * 100))}%`, true),
+        subtext: hasPrev ? `vs ${fmt.num(prevTotals.sessions)} prior` : "this period",
+      },
+      {
+        label: "Errors",
+        value: fmt.num(errCount),
+        delta: hasPrev && Math.abs(errDelta) > 0 ? { label: (errDelta > 0 ? "+" : "") + fmt.num(errDelta), positive: errDelta < 0, neutral: false } : (hasPrev ? { label: "stable", positive: true, neutral: true } : null),
+        subtext: `${fmt.pct(totals.errorRate)} error rate`,
+      },
+      {
+        label: "Apdex",
+        value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",
+        delta: delta(totals.apdex, prevTotals.apdex, (v) => (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "pts", true),
+        subtext: isFinite(totals.apdex) ? (totals.apdex >= 0.94 ? "Excellent" : totals.apdex >= 0.85 ? "Good" : totals.apdex >= 0.7 ? "Fair" : "Poor") : "",
+      },
+      {
+        label: "Avg load",
+        value: fmt.ms(totals.avgDur),
+        delta: delta(totals.avgDur, prevTotals.avgDur, (v) => (v > 0 ? "+" : "") + (v / 1000).toFixed(2) + "s", false),
+        subtext: isFinite(totals.avgDur) ? (totals.avgDur < 3000 ? "< 3s target" : "above target") : "",
+      },
+    ];
   }, [totals, prevTotals]);
 
   // What Changed per-app (#1)
@@ -356,24 +363,30 @@ export const ExecutiveSummaryTab: React.FC = () => {
         if (Math.abs(delta) < 4) return null;
         const curr = gradeFromScore(r.score);
         const prevGrade = gradeFromScore(p.score);
-        // Identify the biggest driver
+        // Identify the most meaningful driver (ignore negligible deltas)
         let driver = "";
         const apdexD = r.summary.apdex - p.apdex;
         const errD = r.summary.errorRate - p.errorRate;
         const durD = r.summary.avgDuration - p.avgDuration;
-        const drivers = [
-          { label: "Apdex", delta: apdexD, positive: apdexD > 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (v * 100).toFixed(0) + " pts" },
-          { label: "Error rate", delta: -errD, positive: errD < 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (-v).toFixed(1) + "pp" },
-          { label: "Load time", delta: -durD, positive: durD < 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (-v / 1000).toFixed(1) + "s" },
-        ].filter(d => !isNaN(d.delta));
-        const top = drivers.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
-        if (top) driver = `${top.label} ${top.fmt(top.delta)}`;
+        const currFruDen = r.summary.satisfied + r.summary.tolerating + r.summary.frustrated;
+        const prevFruDen = (p.satisfied ?? 0) + (p.tolerating ?? 0) + (p.frustrated ?? 0);
+        const currFruPct = currFruDen > 0 ? (r.summary.frustrated / currFruDen) * 100 : NaN;
+        const prevFruPct = prevFruDen > 0 ? ((p.frustrated ?? 0) / prevFruDen) * 100 : NaN;
+        const fruD = isFinite(currFruPct) && isFinite(prevFruPct) ? currFruPct - prevFruPct : NaN;
+        const candidates = [
+          Math.abs(apdexD) >= 0.01           ? { label: "Apdex",         str: (apdexD > 0 ? "+" : "") + (apdexD * 100).toFixed(0) + " pts" }  : null,
+          isFinite(fruD) && Math.abs(fruD) >= 2 ? { label: "Frustrated %", str: (fruD > 0 ? "+" : "") + fruD.toFixed(0) + "pp" }               : null,
+          Math.abs(errD)   >= 0.1            ? { label: "Error rate",     str: (errD   > 0 ? "+" : "") + errD.toFixed(1) + "pp" }               : null,
+          Math.abs(durD)   >= 200            ? { label: "Load time",      str: (durD   > 0 ? "+" : "") + (durD / 1000).toFixed(1) + "s" }       : null,
+        ].filter((c): c is NonNullable<typeof c> => c !== null);
+        driver = candidates[0]?.label ? `${candidates[0].label} ${candidates[0].str}` : "";
         return { application: r.summary.application, delta, curr, prevGrade, driver, gradeMoved: curr.letter !== prevGrade.letter };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
       .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
       .slice(0, 10);
-  }, [scoredRows, prevScoredRows]);
+  // Gate on prevVitals being present — prevents false changes from CWV data availability differences
+  }, [scoredRows, prevScoredRows, prevVitals.data]);
 
   const fleetVitals = useMemo(() => {
     let lN = 0, lW = 0, iN = 0, iW = 0, cN = 0, cW = 0, tN = 0, tW = 0;
@@ -417,14 +430,39 @@ export const ExecutiveSummaryTab: React.FC = () => {
     if (v <= poor) return 0;
     return 100 * ((v - poor) / (good - poor));
   };
-  const gradeMetrics = useMemo(() => [
-    { label: "Apdex", weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94), value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—", color: apdexClr(totals.apdex) },
-    { label: "Error rate", weight: 20, score: scoreLB(totals.errorRate, 0.5, 5), value: fmt.pct(totals.errorRate), color: errClr(totals.errorRate) },
-    { label: "Avg duration", weight: 15, score: scoreLB(totals.avgDur, 1000, 8000), value: fmt.ms(totals.avgDur), color: durClr(totals.avgDur) },
-    { label: "CWV — LCP", weight: 15, score: scoreLB(fleetVitals.lcp, 2500, 4000), value: fmt.ms(fleetVitals.lcp), color: cwvLcpClr(fleetVitals.lcp) },
-    { label: "CWV — INP", weight: 15, score: scoreLB(fleetVitals.inp, 200, 500), value: fmt.ms(fleetVitals.inp), color: cwvInpClr(fleetVitals.inp) },
-    { label: "CWV — CLS", weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25), value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls) },
-  ], [totals, fleetVitals]);
+  const gradeMetrics = useMemo(() => {
+    const satN = totals.satisfied;
+    const tolN = totals.tolerating;
+    const fruN = totals.frustrated;
+    const sfTotal = satN + tolN + fruN;
+    const satPct  = sfTotal > 0 ? (satN / sfTotal) * 100 : 0;
+    const tolPct  = sfTotal > 0 ? (tolN / sfTotal) * 100 : 0;
+    const fruPct  = sfTotal > 0 ? (fruN / sfTotal) * 100 : 0;
+    const apdexSubtext = sfTotal > 0 ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, height: 5, borderRadius: 3, overflow: "hidden", display: "flex" }}>
+          <div style={{ width: `${satPct}%`, background: GREEN }} />
+          <div style={{ width: `${tolPct}%`, background: YELLOW }} />
+          <div style={{ width: `${fruPct}%`, background: RED }} />
+        </div>
+        <div style={{ fontSize: 10, opacity: 0.65, whiteSpace: "nowrap" }}>
+          <span style={{ color: GREEN }}>▇ {fmt.num(satN)} sat</span>
+          {" · "}
+          <span style={{ color: YELLOW }}>▇ {fmt.num(tolN)} tol</span>
+          {" · "}
+          <span style={{ color: RED }}>▇ {fmt.num(fruN)} fru</span>
+        </div>
+      </div>
+    ) : null;
+    return [
+      { label: "Apdex",     weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94),         value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",     color: apdexClr(totals.apdex),       subtext: apdexSubtext },
+      { label: "Error rate",weight: 22, score: scoreLB(totals.errorRate, 0.5, 5),          value: fmt.pct(totals.errorRate),                                   color: errClr(totals.errorRate),     subtext: undefined },
+      { label: "CWV — LCP", weight: 20, score: scoreLB(fleetVitals.lcp, 2500, 4000),       value: fmt.ms(fleetVitals.lcp),                                     color: cwvLcpClr(fleetVitals.lcp),   subtext: undefined },
+      { label: "CWV — INP", weight: 16, score: scoreLB(fleetVitals.inp, 200, 500),         value: fmt.ms(fleetVitals.inp),                                     color: cwvInpClr(fleetVitals.inp),   subtext: undefined },
+      { label: "CWV — CLS", weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25),        value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls), subtext: undefined },
+      { label: "CWV — TTFB",weight: 7,  score: scoreLB(fleetVitals.ttfb, 800, 1800),       value: fmt.ms(fleetVitals.ttfb),                                    color: cwvTtfbClr(fleetVitals.ttfb), subtext: undefined },
+    ];
+  }, [totals, fleetVitals]);
 
   const narrative = useMemo(() => {
     const lines: string[] = [];
@@ -433,7 +471,10 @@ export const ExecutiveSummaryTab: React.FC = () => {
     lines.push(`Over the last ${period}, ${scope} handled ${fmt.num(totals.sessions)} session${totals.sessions === 1 ? "" : "s"} and ${fmt.num(totals.actions)} user actions.`);
     if (isFinite(totals.apdex)) {
       const q = apdexLabel(totals.apdex).toLowerCase();
-      lines.push(`Fleet Apdex is ${totals.apdex.toFixed(2)} (${q}) — ${fmt.num(totals.frustrated)} action${totals.frustrated === 1 ? "" : "s"} classified as frustrated.`);
+      const sfDen = totals.satisfied + totals.tolerating + totals.frustrated;
+      const fruPct = sfDen > 0 ? ((totals.frustrated / sfDen) * 100).toFixed(0) : "—";
+      const satPct = sfDen > 0 ? ((totals.satisfied  / sfDen) * 100).toFixed(0) : "—";
+      lines.push(`Fleet Apdex is ${totals.apdex.toFixed(2)} (${q}) — ${satPct}% satisfied, ${fmt.num(totals.tolerating)} tolerating, ${fmt.num(totals.frustrated)} frustrated (${fruPct}%).`);
     }
     if (totals.errorRate > 1) {
       lines.push(`Error rate is ${fmt.pct(totals.errorRate)}, above the 1% healthy threshold. Prioritise the noisy applications on the Errors tab.`);
@@ -607,7 +648,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Overall Fleet Grade</div>
           <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>Weighted score: <b>{isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"}</b> / 100</div>
-          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>Blend of Apdex (25%), Error rate (20%), Duration (15%), CWV — LCP (15%), INP (15%), CLS (10%).</div>
+          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>Blend of Apdex (25%), Error rate (22%), CWV — LCP (20%), INP (16%), CLS (10%), TTFB (7%). Apdex uses satisfied/tolerating/frustrated counts.</div>
         </div>
       </div>
 
@@ -615,7 +656,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
       <SectionCard title="Grade Breakdown" subtitle="Weighted contributors to the overall fleet grade.">
         <div>
           {gradeMetrics.map((m) => (
-            <GradeMetricRow key={m.label} label={m.label} weight={m.weight} score={m.score} displayValue={m.value} color={m.color} />
+            <GradeMetricRow key={m.label} label={m.label} weight={m.weight} score={m.score} displayValue={m.value} color={m.color} subtext={m.subtext} />
           ))}
         </div>
       </SectionCard>
@@ -637,19 +678,24 @@ export const ExecutiveSummaryTab: React.FC = () => {
       </div>
 
       {/* Business Impact (#3) */}
-      {impactBullets.length > 0 && (
-        <>
-          <SectionHeader title="Business Impact" subtitle="How this period compares to the previous one — in user terms." />
-          <div style={{ margin: "0 20px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
-            {impactBullets.map((b, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 8, background: b.positive ? `${GREEN}0d` : `${RED}0d`, border: `1px solid ${b.positive ? GREEN : RED}33` }}>
-                <span style={{ fontSize: 16, color: b.positive ? GREEN : RED }}>{b.positive ? "↑" : "↓"}</span>
-                <span style={{ fontSize: 13 }}>{b.text}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      <SectionHeader title="Business Impact" subtitle="Key metrics vs the prior equivalent period." />
+      <div style={{ padding: "0 20px 8px", display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {impactStats.map((s) => {
+          const dColor = s.delta == null || s.delta.neutral ? "rgba(128,128,128,0.6)" : s.delta.positive ? GREEN : RED;
+          return (
+            <div key={s.label} style={{ padding: "12px 18px", borderRadius: 10, background: "rgba(128,128,128,0.07)", border: "1px solid rgba(128,128,128,0.15)", minWidth: 140, flex: "1 1 140px" }}>
+              <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>{s.value}</div>
+              {s.delta != null && (
+                <div style={{ fontSize: 11, color: dColor, fontWeight: 600, marginTop: 3 }}>
+                  {s.delta.neutral ? "=" : s.delta.positive ? "↑" : "↓"} {s.delta.label}
+                </div>
+              )}
+              <div style={{ fontSize: 10, opacity: 0.45, marginTop: 2 }}>{s.subtext}</div>
+            </div>
+          );
+        })}
+      </div>
 
       {/* What Changed per-app (#1) */}
       {whatChanged.length > 0 && (
@@ -683,6 +729,10 @@ export const ExecutiveSummaryTab: React.FC = () => {
         {allAppsScoredRows.map(({ summary, score }) => {
           const g = gradeFromScore(score);
           const isSelected = sel === summary.application;
+          const sfDen = (summary.satisfied ?? 0) + (summary.tolerating ?? 0) + (summary.frustrated ?? 0);
+          const sPct = sfDen > 0 ? ((summary.satisfied  ?? 0) / sfDen) * 100 : 0;
+          const tPct = sfDen > 0 ? ((summary.tolerating ?? 0) / sfDen) * 100 : 0;
+          const fPct = sfDen > 0 ? ((summary.frustrated ?? 0) / sfDen) * 100 : 0;
           return (
             <div
               key={summary.application}
@@ -709,6 +759,13 @@ export const ExecutiveSummaryTab: React.FC = () => {
               <div style={{ fontSize: 10, opacity: 0.5, fontFamily: "monospace" }}>
                 {isFinite(score) ? `${score.toFixed(0)}/100` : "—"}
               </div>
+              {sfDen > 0 && (
+                <div style={{ width: "100%", height: 4, borderRadius: 2, overflow: "hidden", display: "flex", marginTop: 2 }}>
+                  <div style={{ width: `${sPct}%`, background: GREEN }} />
+                  <div style={{ width: `${tPct}%`, background: YELLOW }} />
+                  <div style={{ width: `${fPct}%`, background: RED }} />
+                </div>
+              )}
             </div>
           );
         })}
