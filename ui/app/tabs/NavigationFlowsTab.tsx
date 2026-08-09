@@ -24,6 +24,15 @@ import { Flex } from "@dynatrace/strato-components/layouts";
 import { Text, Strong } from "@dynatrace/strato-components/typography";
 import { getEnvironmentUrl } from "@dynatrace-sdk/app-environment";
 const ENV_URL = getEnvironmentUrl();
+
+function sessionsFilterUrl(countryIso: string, appName: string | null, days: number): string {
+  const countryName = ISO_NAMES[countryIso.toUpperCase()] ?? countryIso;
+  const tf = encodeURIComponent(`now-${days}d;now`);
+  const filter = appName
+    ? `Frontends = ${appName} Location = "${countryName}"`
+    : `Location = "${countryName}"`;
+  return `${ENV_URL}/ui/apps/dynatrace.users.sessions/sessions/sessions?tf=${tf}&perspective=general#filtering=${encodeURIComponent(filter)}`;
+}
 import {
   topPagesQuery, pageTransitionsQuery, pagesBucketedMetricsQuery,
   geoFullQuery, geoFullBucketedQuery,
@@ -1942,7 +1951,11 @@ const WorldMapSubTab: React.FC = () => {
                   <span>Avg: <strong style={{ color: selectedCountry.avgDur > 3000 ? RED : GREEN }}>{fmtMs(selectedCountry.avgDur)}</strong></span>
                   <span>Errors: <strong style={{ color: selectedCountry.errors > 0 ? RED : GREEN }}>{fmtCount(selectedCountry.errors)}</strong></span>
                   {!isNaN(selectedCountry.lcp) && <span>LCP: <strong style={{ color: selectedCountry.lcp > CWV.lcp.poor ? RED : GREEN }}>{fmtMs(selectedCountry.lcp)}</strong></span>}
-                  <button onClick={() => setSelectedIso(null)} style={{ marginLeft: "auto", padding: "3px 10px", borderRadius: 4, border: "1px solid rgba(128,128,128,0.3)", background: "transparent", color: "rgba(128,128,128,0.7)", fontSize: 11, cursor: "pointer" }}>✕ Close</button>
+                  <a href={sessionsFilterUrl(selectedCountry.iso, sel, timeframeDays)} target="_blank" rel="noopener noreferrer"
+                    style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 4, border: `1px solid ${BLUE}55`, background: `${BLUE}18`, color: BLUE, fontSize: 11, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>
+                    View Sessions ↗
+                  </a>
+                  <button onClick={() => setSelectedIso(null)} style={{ padding: "3px 10px", borderRadius: 4, border: "1px solid rgba(128,128,128,0.3)", background: "transparent", color: "rgba(128,128,128,0.7)", fontSize: 11, cursor: "pointer" }}>✕ Close</button>
                 </div>
               )}
             </div>
@@ -1965,7 +1978,7 @@ const WorldMapSubTab: React.FC = () => {
             };
 
             // Build paths with pen-lift: lift when invisible → no equator wrap artifacts
-            const globePaths: { fillD: string; d: string; fill: string; title: string }[] = [];
+            const globePaths: { fillD: string; d: string; fill: string; title: string; alpha2: string }[] = [];
             (worldGeo as any).features.forEach((feat: any) => {
               const numId = String(feat.id);
               const alpha2 = ISO_NUMERIC_TO_ALPHA2[numId] ?? "";
@@ -1997,7 +2010,7 @@ const WorldMapSubTab: React.FC = () => {
                   }
                 }
                 if (penDown) fillD += "Z";
-                if (d) globePaths.push({ fillD, d, fill, title });
+                if (d) globePaths.push({ fillD, d, fill, title, alpha2 });
               }
             });
 
@@ -2042,14 +2055,19 @@ const WorldMapSubTab: React.FC = () => {
                   {/* Land fills — clipped to sphere, closed at terminator by fillD */}
                   <g clipPath="url(#nf-globe-clip)">
                     {globePaths.map((p, i) => (
-                      <path key={i} d={p.fillD} fill={p.fill} stroke="none" />
+                      <path key={i} d={p.fillD} fill={p.fill} stroke="none"
+                        style={{ cursor: p.alpha2 ? "pointer" : "default" }}
+                        onClick={() => { if (p.alpha2) window.open(sessionsFilterUrl(p.alpha2, sel, timeframeDays), "_blank", "noopener,noreferrer"); }}
+                      />
                     ))}
                   </g>
                   {/* Country borders — pen-lift avoids wrap artifacts */}
                   {globePaths.map((p, i) => (
                     <path key={i} d={p.d} fill="none"
                       stroke="rgba(255,255,255,0.18)" strokeWidth={0.5}
-                      strokeLinecap="round" strokeLinejoin="round">
+                      strokeLinecap="round" strokeLinejoin="round"
+                      style={{ cursor: p.alpha2 ? "pointer" : "default" }}
+                      onClick={() => { if (p.alpha2) window.open(sessionsFilterUrl(p.alpha2, sel, timeframeDays), "_blank", "noopener,noreferrer"); }}>
                       {p.title && <title>{p.title}</title>}
                     </path>
                   ))}
