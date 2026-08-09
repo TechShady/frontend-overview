@@ -1905,6 +1905,8 @@ const WorldMapSubTab: React.FC = () => {
                     const delay = Math.min(fIdx * 0.006, 0.6);
                     const isSelected = selectedIso === alpha2;
 
+                    const openSessions = alpha2 ? () => window.open(sessionsFilterUrl(alpha2, sel, timeframeDays), "_blank", "noopener,noreferrer") : undefined;
+
                     if (tl.enabled && alpha2) {
                       const fillColor = getTlColor(alpha2);
                       const snap = currentHourData?.get(alpha2);
@@ -1912,8 +1914,9 @@ const WorldMapSubTab: React.FC = () => {
                         <path key={numId} d={d} fill={fillColor}
                           stroke={isHov ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.12)"}
                           strokeWidth={isHov ? 1.5 : 0.4}
-                          style={{ transition: "fill 0.5s ease", cursor: c ? "pointer" : "default" }}
+                          style={{ transition: "fill 0.5s ease", cursor: "pointer" }}
                           className="nf-country-path"
+                          onClick={openSessions}
                           onMouseEnter={() => setHoveredId(numId)} onMouseLeave={() => setHoveredId(null)}>
                           <title>{decodeName(alpha2, "")}{snap ? `\nSessions: ${fmtCount(snap.sessions)}\nApdex: ${calcApdex(snap.sat, snap.tol, snap.actions).toFixed(2)}` : "\nNo data this bucket"}</title>
                         </path>
@@ -1923,11 +1926,11 @@ const WorldMapSubTab: React.FC = () => {
                     if (c) return (
                       <path key={numId} d={d}
                         fill={getMetricColor(c)}
-                        stroke={isHov || isSelected ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)"}
-                        strokeWidth={isHov || isSelected ? 2 : 0.5}
+                        stroke={isHov ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.2)"}
+                        strokeWidth={isHov ? 2 : 0.5}
                         className="nf-country-path"
                         style={{ animationDelay: `${delay}s`, cursor: "pointer" }}
-                        onClick={() => setSelectedIso(isSelected ? null : alpha2)}
+                        onClick={openSessions}
                         onMouseEnter={() => setHoveredId(numId)} onMouseLeave={() => setHoveredId(null)}>
                         <title>{decodeName(c.iso, "")}\n{MAP_METRICS.find(m => m.id === metric)?.label}: {formatMetricValue(c)}\nSessions: {fmtCount(c.sessions)}\nApdex: {c.apdex.toFixed(2)}\nErr%: {fmtPct(c.errRate)}</title>
                       </path>
@@ -1936,7 +1939,8 @@ const WorldMapSubTab: React.FC = () => {
                       <path key={numId} d={d} fill="rgba(255,255,255,0.04)"
                         stroke="rgba(255,255,255,0.08)" strokeWidth={0.3}
                         className="nf-country-path"
-                        style={{ animationDelay: `${delay}s` }}
+                        style={{ animationDelay: `${delay}s`, cursor: alpha2 ? "pointer" : "default" }}
+                        onClick={openSessions}
                         onMouseEnter={() => setHoveredId(numId)} onMouseLeave={() => setHoveredId(null)} />
                     );
                   })}
@@ -2202,7 +2206,7 @@ const SessionReplaySubTab: React.FC = () => {
                 Country: String(s.country ?? "—"),
                 Crash: Boolean(s.has_crash) ? "Yes" : "No",
                 Bounce: Boolean(s.is_bounce) ? "Yes" : "No",
-                _replayUrl: `${ENV_URL}/ui/apps/dynatrace.users.sessions/session-viewer/${s.session_id}/${st}?tf=now-2h%3Bnow&df=1&perspective=general&sort=hasReplay%3Adescending`,
+                replayLink: `${ENV_URL}/ui/apps/dynatrace.users.sessions/session-viewer/${s.session_id}/${st}?tf=now-2h%3Bnow&df=1&perspective=general&sort=hasReplay%3Adescending`,
               };
             })} columns={[
               { id: "Web App", header: "Web App", accessor: "Web App", cell: ({ value }: any) => <span style={{ fontWeight: 600, color: BLUE }}>{value}</span> },
@@ -2215,7 +2219,7 @@ const SessionReplaySubTab: React.FC = () => {
               { id: "Country", header: "Country", accessor: "Country" },
               { id: "Crash", header: "Crash", accessor: "Crash", cell: ({ value }: any) => <span style={{ color: value === "Yes" ? RED : GREEN }}>{value}</span> },
               { id: "Bounce", header: "Bounce", accessor: "Bounce", cell: ({ value }: any) => <span style={{ color: value === "Yes" ? ORANGE : GREEN }}>{value}</span> },
-              { id: "Replay", header: "Replay", accessor: "_replayUrl", cell: ({ value }: any) => (
+              { id: "Replay", header: "Replay", accessor: "replayLink", cell: ({ value }: any) => (
                 <a href={value} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, fontSize: 12, textDecoration: "none" }}>▶ Replay</a>
               )},
             ]} />
