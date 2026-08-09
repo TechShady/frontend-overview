@@ -49,7 +49,6 @@ export const PerfBudgetsTab: React.FC = () => {
         { key: "inp",              label: "INP",           value: r.inp,              limit: budgets.inp_ms,           unit: "ms" },
         { key: "cls",              label: "CLS",           value: r.cls,              limit: budgets.cls,              unit: "" },
         { key: "ttfb",             label: "TTFB",          value: r.ttfb,             limit: budgets.ttfb_ms,          unit: "ms" },
-        { key: "bytesPerPage",     label: "Bytes / page",  value: r.bytesPerPage,     limit: budgets.bytesPerPage_kb * 1024, unit: "B" },
         { key: "requestsPerPage",  label: "Reqs / page",   value: r.requestsPerPage,  limit: budgets.requestsPerPage,  unit: "" },
         { key: "errorRate",        label: "Error rate",    value: r.errorRate,        limit: budgets.errorRate_pct,    unit: "%" },
       ];
@@ -86,7 +85,6 @@ export const PerfBudgetsTab: React.FC = () => {
     { id: "inp",              header: "INP",           accessor: "inp",             width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.inp_ms, "ms") },
     { id: "cls",              header: "CLS",           accessor: "cls",             width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.cls, "") },
     { id: "ttfb",             header: "TTFB",          accessor: "ttfb",            width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.ttfb_ms, "ms") },
-    { id: "bytesPerPage",     header: "Bytes / page",  accessor: "bytesPerPage",    width: 110, sortType: "number" as any, cell: mkBudgetCell(budgets.bytesPerPage_kb * 1024, "B") },
     { id: "requestsPerPage",  header: "Reqs / page",   accessor: "requestsPerPage", width: 100, sortType: "number" as any, cell: mkBudgetCell(budgets.requestsPerPage, "") },
     { id: "errorRate",        header: "Error rate",    accessor: "errorRate",       width: 100, sortType: "number" as any, cell: mkBudgetCell(budgets.errorRate_pct, "%") },
   ], [budgets]);
@@ -106,7 +104,6 @@ export const PerfBudgetsTab: React.FC = () => {
     cls: appBucket.cls ?? {},
     ttfb: appBucket.ttfb ?? {},
     errorRate: appBucket.errorRate ?? {},
-    bytesPerPage: appBucket.sessions ?? {},
     requestsPerPage: appBucket.sessions ?? {},
   }), [appBucket]);
   const sortOptions: TLSortOption<any>[] = useMemo(() => [
@@ -116,7 +113,6 @@ export const PerfBudgetsTab: React.FC = () => {
     { value: "inp",             label: "INP",           get: (r) => Number(r.inp),             higherIsBetter: false },
     { value: "cls",             label: "CLS",           get: (r) => Number(r.cls),             higherIsBetter: false },
     { value: "ttfb",            label: "TTFB",          get: (r) => Number(r.ttfb),            higherIsBetter: false },
-    { value: "bytesPerPage",    label: "Bytes / page",  get: (r) => Number(r.bytesPerPage),    higherIsBetter: false },
     { value: "requestsPerPage", label: "Reqs / page",   get: (r) => Number(r.requestsPerPage), higherIsBetter: false },
     { value: "errorRate",       label: "Error rate",    get: (r) => Number(r.errorRate),       higherIsBetter: false },
   ], []);
@@ -136,7 +132,6 @@ export const PerfBudgetsTab: React.FC = () => {
             { key: "inp_ms",           label: "INP (ms)",           step: 10 },
             { key: "cls",              label: "CLS",                step: 0.01 },
             { key: "ttfb_ms",          label: "TTFB (ms)",          step: 50 },
-            { key: "bytesPerPage_kb",  label: "Bytes / page (KB)",  step: 100 },
             { key: "requestsPerPage",  label: "Reqs / page",        step: 5 },
             { key: "errorRate_pct",    label: "Error rate (%)",     step: 0.1 },
           ].map((b) => (

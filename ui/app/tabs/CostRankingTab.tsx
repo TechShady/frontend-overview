@@ -21,7 +21,6 @@ export const CostRankingTab: React.FC = () => {
   const tl = useTimelapse();
   const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
-  const [rateBandwidth, setRateBandwidth] = useState(0.08); // $ per GB egress
   const [rateReq, setRateReq] = useState(0.0000004);       // $ per HTTP request (CDN)
   const [rateRumEvent, setRateRumEvent] = useState(0.00001); // $ per RUM action captured
 
@@ -35,28 +34,23 @@ export const CostRankingTab: React.FC = () => {
     (sum.data?.records ?? []).forEach((r: any) => { actionsBy[String(r.application)] = Number(r.actions ?? 0); });
     return (consumption.data?.records ?? []).map((r: any) => {
       const app = String(r.application ?? "");
-      const bytes = Number(r.totalBytes ?? 0);
       const reqs = Number(r.totalRequests ?? 0);
       const actions = actionsBy[app] ?? 0;
-      const costBandwidth = (bytes / 1e9) * rateBandwidth;
       const costReqs = reqs * rateReq;
       const costRum = actions * rateRumEvent;
-      const total = costBandwidth + costReqs + costRum;
+      const total = costReqs + costRum;
       return {
         application: app,
-        bytes,
         requests: reqs,
         actions,
-        costBandwidth,
         costReqs,
         costRum,
         totalCost: total,
       };
     });
-  }, [consumption.data, sum.data, rateBandwidth, rateReq, rateRumEvent]);
+  }, [consumption.data, sum.data, rateReq, rateRumEvent]);
 
   const totalCost = rows.reduce((a, r) => a + r.totalCost, 0);
-  const mostExpensive = rows.slice().sort((a, b) => b.totalCost - a.totalCost)[0];
 
   const { panel: aiPanel } = useAIInsights(useCallback(() =>
     analyzeCostRanking(
@@ -74,8 +68,6 @@ export const CostRankingTab: React.FC = () => {
       cell: ({ value }: any) => <span style={{ fontWeight: 700, opacity: 0.7 }}>#{Number(value)}</span> },
     { id: "application", header: "Web App", accessor: "application", width: 200,
       cell: ({ value }: any) => <span style={{ fontWeight: 600 }}>{String(value)}</span> },
-    { id: "costBandwidth", header: "Bandwidth ($)", accessor: "costBandwidth", width: 130, sortType: "number" as any,
-      cell: ({ value }: any) => <span>${Number(value).toFixed(2)}</span> },
     { id: "costReqs", header: "Requests ($)", accessor: "costReqs", width: 130, sortType: "number" as any,
       cell: ({ value }: any) => <span>${Number(value).toFixed(2)}</span> },
     { id: "costRum", header: "RUM ($)", accessor: "costRum", width: 110, sortType: "number" as any,
@@ -109,15 +101,13 @@ export const CostRankingTab: React.FC = () => {
   const bucketBySort = useMemo(() => ({
     totalCost: bucketValuesBySort.actions ?? {},
     costRum: bucketValuesBySort.actions ?? {},
-    costBandwidth: bucketValuesBySort.sessions ?? {},
     costReqs: bucketValuesBySort.actions ?? {},
   }), [bucketValuesBySort]);
 
   const sortOptions: TLSortOption<typeof ranked[number]>[] = useMemo(() => [
-    { value: "totalCost",     label: "Total cost",       get: (r) => Number(r.totalCost),     higherIsBetter: false },
-    { value: "costBandwidth", label: "Bandwidth cost",   get: (r) => Number(r.costBandwidth), higherIsBetter: false },
-    { value: "costReqs",      label: "Request cost",     get: (r) => Number(r.costReqs),      higherIsBetter: false },
-    { value: "costRum",       label: "RUM capture cost", get: (r) => Number(r.costRum),       higherIsBetter: false },
+    { value: "totalCost", label: "Total cost",       get: (r) => Number(r.totalCost), higherIsBetter: false },
+    { value: "costReqs",  label: "Request cost",     get: (r) => Number(r.costReqs),  higherIsBetter: false },
+    { value: "costRum",   label: "RUM capture cost", get: (r) => Number(r.costRum),   higherIsBetter: false },
   ], []);
 
   return (
@@ -125,7 +115,6 @@ export const CostRankingTab: React.FC = () => {
       {aiPanel}
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
         <KpiCard label="Estimated fleet cost" value={`$${totalCost.toFixed(2)}`} rawValue={totalCost} color="#FF832B" sparkline={spk?.actions} />
-        <KpiCard label="Most expensive web app" value={mostExpensive ? (mostExpensive.application.length > 24 ? mostExpensive.application.slice(0, 23) + "…" : mostExpensive.application) : "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" rawValue={mostExpensive?.totalCost} sparkline={spk?.actions} />
         <KpiCard label="Cost / user action" value={`$${costPerAction.toFixed(5)}`} rawValue={costPerAction} color="#A56EFF" sparkline={spk?.actions} />
       </div>
 
@@ -134,11 +123,6 @@ export const CostRankingTab: React.FC = () => {
         subtitle="These rates are illustrative. Adjust to match your CDN / observability contract for realistic numbers. Apps with $0 may lack resource-consumption data in your environment."
       >
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12, alignItems: "flex-end" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ opacity: 0.7 }}>Bandwidth ($/GB)</span>
-            <input type="number" step="0.01" value={rateBandwidth} onChange={(e) => setRateBandwidth(Number(e.target.value))}
-              style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 100, color: "white" }} />
-          </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ opacity: 0.7 }}>Per HTTP request ($)</span>
             <input type="number" step="0.0000001" value={rateReq} onChange={(e) => setRateReq(Number(e.target.value))}
@@ -150,7 +134,7 @@ export const CostRankingTab: React.FC = () => {
               style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 120, color: "white" }} />
           </label>
           <button
-            onClick={() => { setRateBandwidth(0.08); setRateReq(0.0000004); setRateRumEvent(0.00001); }}
+            onClick={() => { setRateReq(0.0000004); setRateRumEvent(0.00001); }}
             style={{ padding: "4px 12px", background: "rgba(128,128,128,0.15)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, color: "white", cursor: "pointer", fontSize: 12 }}
           >Reset defaults</button>
         </div>
@@ -158,7 +142,7 @@ export const CostRankingTab: React.FC = () => {
 
       <SectionCard
         title="Web-App Cost Leaderboard"
-        subtitle={`Combined bandwidth + request + RUM-capture cost per web app over the selected ${timeframeDays}-day timeframe. Ranked highest to lowest.`}
+        subtitle={`Estimated request + RUM-capture cost per web app over the selected ${timeframeDays}-day timeframe. Ranked highest to lowest.`}
       >
         {consumption.loading ? <EmptyState loading /> : ranked.length === 0 ? <EmptyState /> : (
           <TimelapseTable

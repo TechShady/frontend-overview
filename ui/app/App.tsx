@@ -543,7 +543,6 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
               ["ttfb_ms", "TTFB (ms)"],
               ["pageLoad_ms", "Page load (ms)"],
               ["errorRate_pct", "Error rate (%)"],
-              ["bytesPerPage_kb", "Bytes / page (KB)"],
               ["requestsPerPage", "Requests / page"],
               ["thirdPartyPct", "3rd party (%)"],
             ] as const).map(([key, label]) => (
