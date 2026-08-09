@@ -31,7 +31,7 @@ import {
   sankeyPrevPathsQuery, sankeyTimelapseQuery, sessionReplayQuery,
 } from "../queries";
 import { ISO_ALPHA2_TO_NUMERIC, ISO_NUMERIC_TO_ALPHA2 } from "../worldMapPaths";
-import { geoNaturalEarth1, geoPath, geoOrthographic } from "d3-geo";
+import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import worldAtlas from "world-atlas/countries-110m.json";
 
@@ -1828,11 +1828,6 @@ const WorldMapSubTab: React.FC = () => {
 
   const selectedCountry = selectedIso ? dataByIso.get(selectedIso) : null;
 
-  // Globe: orthographic projection — clipAngle(90) clips to visible hemisphere, prevents wrap artifacts
-  const globeProj = useMemo(() =>
-    geoOrthographic().scale(240).translate([480, 260]).rotate([-rotLng, -15, 0]).clipAngle(90),
-  [rotLng]);
-  const globePathGen = useMemo(() => geoPath().projection(globeProj), [globeProj]);
 
   const animCSS = `
     @keyframes nf-map-fadein { from { opacity: 0; } to { opacity: 1; } }
@@ -1953,53 +1948,117 @@ const WorldMapSubTab: React.FC = () => {
             </div>
           )}
 
-          {/* GLOBE */}
-          {mapView === "globe" && (
-            <div style={{ background: "rgba(6,10,20,0.95)", borderRadius: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", position: "relative" }}>
-              <button
-                onMouseDown={() => handleSpinDown(-1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
-                onTouchStart={() => handleSpinDown(-1)} onTouchEnd={handleSpinUp}
-                onDoubleClick={() => handleSpinLockToggle(-1)}
-                title={spinLock === -1 ? "Double-click to unlock" : "Hold to spin · Double-click to lock"}
-                style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === -1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === -1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === -1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
-              >◀</button>
-              <button
-                onMouseDown={() => handleSpinDown(1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
-                onTouchStart={() => handleSpinDown(1)} onTouchEnd={handleSpinUp}
-                onDoubleClick={() => handleSpinLockToggle(1)}
-                title={spinLock === 1 ? "Double-click to unlock" : "Hold to spin · Double-click to lock"}
-                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === 1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === 1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === 1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
-              >▶</button>
-              <svg viewBox="0 0 960 520" style={{ width: "100%", display: "block" }}>
-                <defs>
-                  <radialGradient id="nf-globe-bg" cx="50%" cy="40%" r="60%">
-                    <stop offset="0%" stopColor="#0a1628" />
-                    <stop offset="100%" stopColor="#020510" />
-                  </radialGradient>
-                  <clipPath id="nf-globe-clip">
-                    <circle cx={480} cy={260} r={242} />
-                  </clipPath>
-                </defs>
-                <circle cx={480} cy={260} r={242} fill="url(#nf-globe-bg)" stroke="rgba(255,255,255,0.06)" strokeWidth={1} />
-                <g clipPath="url(#nf-globe-clip)">
-                  {(worldGeo as any).features.map((feat: any) => {
-                    const numId = String(feat.id);
-                    const alpha2 = ISO_NUMERIC_TO_ALPHA2[numId] ?? "";
-                    const c = dataByIso.get(alpha2);
-                    const d = globePathGen(feat) ?? "";
-                    if (!d) return null;
-                    const fill = c ? (tl.enabled ? getTlColor(alpha2) : getMetricColor(c)) : "rgba(255,255,255,0.04)";
-                    return (
-                      <path key={numId} d={d} fill={fill} stroke="rgba(255,255,255,0.12)" strokeWidth={0.4}>
-                        {c && <title>{decodeName(c.iso, "")}\n{MAP_METRICS.find(m => m.id === metric)?.label}: {formatMetricValue(c)}</title>}
-                      </path>
-                    );
-                  })}
-                </g>
-                <circle cx={480} cy={260} r={242} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
-              </svg>
-            </div>
-          )}
+          {/* GLOBE — manual orthographic projection with pen-lift to avoid wrap artifacts */}
+          {mapView === "globe" && (() => {
+            const RAD = Math.PI / 180;
+            const R = 200;
+            const CX = 480, CY = 260;
+
+            // Stricter visibility — reject points near the rim (cosC > 0.15) to avoid edge artifacts
+            const projectStrict = (lat: number, lng: number): [number, number, boolean] => {
+              const lam = (lng - rotLng) * RAD;
+              const phi = lat * RAD;
+              const cosC = Math.cos(phi) * Math.cos(lam);
+              const x = CX + R * Math.cos(phi) * Math.sin(lam);
+              const y = CY - R * Math.sin(phi);
+              return [x, y, cosC > 0.15];
+            };
+
+            // Build paths with pen-lift: lift when invisible → no equator wrap artifacts
+            const globePaths: { fillD: string; d: string; fill: string; title: string }[] = [];
+            (worldGeo as any).features.forEach((feat: any) => {
+              const numId = String(feat.id);
+              const alpha2 = ISO_NUMERIC_TO_ALPHA2[numId] ?? "";
+              const c = dataByIso.get(alpha2);
+              const fill = c ? (tl.enabled ? getTlColor(alpha2) : getMetricColor(c)) : "rgba(255,255,255,0.04)";
+              const title = c ? `${decodeName(c.iso, "")}\n${MAP_METRICS.find(m => m.id === metric)?.label}: ${formatMetricValue(c)}` : "";
+              const coords = feat.geometry?.coordinates;
+              if (!coords || coords.length === 0) return;
+              const rings: number[][][] = feat.geometry.type === "Polygon"
+                ? [coords[0]]
+                : feat.geometry.type === "MultiPolygon"
+                  ? coords.map((p: any) => p[0])
+                  : [];
+              for (const ring of rings) {
+                if (!ring || ring.length < 3) continue;
+                let d = "", fillD = "";
+                let penDown = false;
+                for (let i = 0; i < ring.length; i += 2) {
+                  const pt = ring[i];
+                  if (!pt) continue;
+                  const [x, y, vis] = projectStrict(pt[1], pt[0]);
+                  if (vis) {
+                    const cmd = penDown ? `L${x.toFixed(1)},${y.toFixed(1)}` : `M${x.toFixed(1)},${y.toFixed(1)}`;
+                    d += cmd; fillD += cmd;
+                    penDown = true;
+                  } else {
+                    if (penDown) fillD += "Z";
+                    penDown = false;
+                  }
+                }
+                if (penDown) fillD += "Z";
+                if (d) globePaths.push({ fillD, d, fill, title });
+              }
+            });
+
+            return (
+              <div style={{ position: "relative", background: "black", borderRadius: 12, padding: "24px 0", overflow: "hidden" }}>
+                <button
+                  onMouseDown={() => handleSpinDown(-1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
+                  onTouchStart={() => handleSpinDown(-1)} onTouchEnd={handleSpinUp}
+                  onDoubleClick={() => handleSpinLockToggle(-1)}
+                  title={spinLock === -1 ? "Double-click to unlock spin" : "Hold to spin · Double-click to lock"}
+                  style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === -1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === -1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === -1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
+                >◀</button>
+                <button
+                  onMouseDown={() => handleSpinDown(1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
+                  onTouchStart={() => handleSpinDown(1)} onTouchEnd={handleSpinUp}
+                  onDoubleClick={() => handleSpinLockToggle(1)}
+                  title={spinLock === 1 ? "Double-click to unlock spin" : "Hold to spin · Double-click to lock"}
+                  style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === 1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === 1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === 1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
+                >▶</button>
+                <svg viewBox="0 0 960 520" style={{ width: "100%", display: "block" }}>
+                  <defs>
+                    <radialGradient id="nf-globe-glow" cx="50%" cy="50%" r="50%">
+                      <stop offset="85%" stopColor="transparent" />
+                      <stop offset="95%" stopColor="rgba(100,180,255,0.15)" />
+                      <stop offset="100%" stopColor="rgba(100,180,255,0.4)" />
+                    </radialGradient>
+                    <radialGradient id="nf-globe-surface" cx="35%" cy="30%" r="65%">
+                      <stop offset="0%" stopColor="rgba(10,50,120,1)" />
+                      <stop offset="60%" stopColor="rgba(4,20,70,1)" />
+                      <stop offset="100%" stopColor="rgba(1,6,28,1)" />
+                    </radialGradient>
+                    <clipPath id="nf-globe-clip">
+                      <circle cx={CX} cy={CY} r={R} />
+                    </clipPath>
+                  </defs>
+                  <rect width="960" height="520" fill="black" />
+                  {/* Atmosphere glow rings */}
+                  <circle cx={CX} cy={CY} r={R + 12} fill="none" stroke="rgba(180,220,255,0.6)" strokeWidth={2} />
+                  <circle cx={CX} cy={CY} r={R + 6} fill="none" stroke="rgba(100,180,255,0.2)" strokeWidth={8} />
+                  {/* Globe sphere */}
+                  <circle cx={CX} cy={CY} r={R} fill="url(#nf-globe-surface)" />
+                  {/* Land fills — clipped to sphere, closed at terminator by fillD */}
+                  <g clipPath="url(#nf-globe-clip)">
+                    {globePaths.map((p, i) => (
+                      <path key={i} d={p.fillD} fill={p.fill} stroke="none" />
+                    ))}
+                  </g>
+                  {/* Country borders — pen-lift avoids wrap artifacts */}
+                  {globePaths.map((p, i) => (
+                    <path key={i} d={p.d} fill="none"
+                      stroke="rgba(255,255,255,0.18)" strokeWidth={0.5}
+                      strokeLinecap="round" strokeLinejoin="round">
+                      {p.title && <title>{p.title}</title>}
+                    </path>
+                  ))}
+                  {/* Outer ring */}
+                  <circle cx={CX} cy={CY} r={R} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
+                </svg>
+              </div>
+            );
+          })()}
 
           {/* Country table */}
           <div style={{ marginTop: 20, overflowX: "auto" }}>
