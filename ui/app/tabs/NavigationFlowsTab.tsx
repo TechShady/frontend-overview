@@ -363,6 +363,38 @@ const NavigationPathsSubTab: React.FC = () => {
   const maxViews = Math.max(1, ...pageRows.map(r => r.views));
   const maxTrans = Math.max(1, ...transitionRows.map(r => r.transitions));
 
+  // Parse bucketed page data into Map<bucketKey, Map<pageName, metrics>> for flow graph timelapse
+  const tlPageBuckets = useMemo(() => {
+    const out = new Map<string, Map<string, { views: number; errors: number; errRate: number; avgDur: number }>>();
+    (pageBucketed.data?.records ?? []).forEach((r: any) => {
+      const bkt = String(r.bkt ?? ""); const page = String(r.page ?? "");
+      if (!bkt || !page) return;
+      let inner = out.get(bkt); if (!inner) { inner = new Map(); out.set(bkt, inner); }
+      const views = Number(r.views ?? 0); const errors = Number(r.errors ?? 0);
+      inner.set(page, { views, errors, errRate: views > 0 ? (errors / views) * 100 : 0, avgDur: Number(r.avgDuration ?? 0) });
+    });
+    return out;
+  }, [pageBucketed.data]);
+
+  const tlBktList = useMemo(() => Array.from(tlPageBuckets.keys()).sort(), [tlPageBuckets]);
+
+  useEffect(() => {
+    if (!tl.enabled || tlBktList.length === 0) return;
+    tl.reportBuckets(tlBktList.length, tlBktList[Math.min(tl.index, tlBktList.length - 1)]);
+  }, [tl.enabled, tlBktList, tl.index]);
+
+  useEffect(() => {
+    if (!tl.enabled) return;
+    tl.reportLoading("navflow", !!pageBucketed.loading);
+    return () => tl.reportLoading("navflow", false);
+  }, [tl.enabled, pageBucketed.loading]);
+
+  // Current bucket's per-page data for node coloring
+  const tlCurrentPageMap = useMemo(() => {
+    if (!tl.enabled || tlBktList.length === 0) return null;
+    return tlPageBuckets.get(tlBktList[Math.min(tl.index, tlBktList.length - 1)]) ?? null;
+  }, [tl.enabled, tlPageBuckets, tlBktList, tl.index]);
+
   const { bucketValuesBySort: pageBucket } = useBucketedRanks({
     records: (pageBucketed.data?.records ?? []) as any[],
     rowKeyField: "page", bucketField: "bkt",
@@ -414,6 +446,11 @@ const NavigationPathsSubTab: React.FC = () => {
             <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: YELLOW, marginRight: 4 }} />&gt;1%</span>
             <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: RED, marginRight: 4 }} />&gt;5%</span>
           </div>
+          {tl.enabled && tlBktList.length > 0 && (
+            <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
+              ⏱ {tlBktList[Math.min(tl.index, tlBktList.length - 1)]}
+            </span>
+          )}
           {selectedFlow && (
             <button onClick={() => setSelectedFlow(null)} style={{ marginLeft: "auto", background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 4, color: "rgba(255,255,255,0.7)", cursor: "pointer", padding: "2px 10px", fontSize: 12 }}>Clear selection</button>
           )}
@@ -469,18 +506,21 @@ const NavigationPathsSubTab: React.FC = () => {
               })}
               {/* Nodes (rectangles, like user-journey-app) */}
               {Array.from(graphData.nodePos.entries()).map(([name, pos]) => {
-                const color = nodeColorOf(pos.errRate);
+                const tlData = tlCurrentPageMap?.get(name);
+                const dispErrRate = tlData ? tlData.errRate : pos.errRate;
+                const dispViews   = tlData ? tlData.views   : pos.views;
+                const color = nodeColorOf(dispErrRate);
                 const shortName = name.length > 26 ? name.substring(0, 24) + "…" : name;
                 const isSelected = selectedFlow?.src === name || selectedFlow?.tgt === name;
                 const hasFocus = selectedFlow !== null;
-                const nodeOpacity = hasFocus ? (isSelected ? 1 : 0.15) : 1;
+                const nodeOpacity = hasFocus ? (isSelected ? 1 : 0.15) : (tlCurrentPageMap && !tlData ? 0.35 : 1);
                 return (
-                  <g key={name} style={{ opacity: nodeOpacity, transition: "opacity 0.2s", cursor: "default" }}>
+                  <g key={name} style={{ opacity: nodeOpacity, transition: "opacity 0.3s, stroke 0.3s", cursor: "default" }}>
                     <rect
                       x={pos.x} y={pos.y} width={graphData.nodeW} height={pos.h} rx={6}
                       fill={`${color}18`}
                       stroke={color}
-                      strokeWidth={1.5}
+                      strokeWidth={tlCurrentPageMap && tlData ? 2.5 : 1.5}
                       strokeOpacity={0.85}
                     />
                     <text x={pos.x + 10} y={pos.y + 18}
@@ -490,9 +530,9 @@ const NavigationPathsSubTab: React.FC = () => {
                     </text>
                     <text x={pos.x + 10} y={pos.y + 38}
                       fontSize={10} fill="rgba(255,255,255,0.65)">
-                      {`${fmtCount(pos.views)} views${pos.errRate > 0 ? ` · ${fmtPct(pos.errRate)} err` : ""}`}
+                      {`${fmtCount(dispViews)} views${dispErrRate > 0 ? ` · ${fmtPct(dispErrRate)} err` : ""}`}
                     </text>
-                    <title>{`${name}\nViews: ${fmtCount(pos.views)}\nErr rate: ${fmtPct(pos.errRate)}`}</title>
+                    <title>{`${name}\nViews: ${fmtCount(dispViews)}\nErr rate: ${fmtPct(dispErrRate)}${tlData ? "\n(timelapse bucket)" : ""}`}</title>
                   </g>
                 );
               })}

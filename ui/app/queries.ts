@@ -412,14 +412,16 @@ export function pagesBucketedMetricsQuery(days: number, selected: string | null,
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
-    | filter isNotNull(frontend.name) and isNotNull(view.url_path)${filt}
+    | filter isNotNull(frontend.name)${filt}
+    | fieldsAdd page = coalesce(view.name, view.url_path, page.detected_name, "unknown")
+    | filter page != "unknown"
     | fieldsAdd bkt = bin(start_time, ${label}), dur_ms = toDouble(duration) / 1000000.0
     | summarize
         views = count(),
         sessions = countDistinct(dt.rum.session.id),
         errors = countIf(characteristics.has_error == true),
         avgDuration = avg(dur_ms),
-        by:{page = view.url_path, bkt}
+        by:{page, bkt}
     | sort views desc
     | limit 5000
   `;
@@ -699,28 +701,28 @@ export function sankeyTimelapseQuery(days: number, selected: string | null, buck
 
 // ---------------------------------------------------------------------------
 // Session Replay Spotlight — sessions ranked by computed impact score.
+// Uses user.sessions (not user.events) to get native crash/bounce/replay fields.
 // ---------------------------------------------------------------------------
 export function sessionReplayQuery(days: number, selected: string | null): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch user.events, ${periodClause(days)}
-    | filter isNotNull(frontend.name) and isNotNull(dt.rum.session.id)${filt}
-    | fieldsAdd dur_ms = toDouble(duration) / 1000000.0
-    | summarize
-        err          = countIf(characteristics.has_error == true),
-        navs         = countDistinct(coalesce(view.name, view.url_path)),
-        interactions = countIf(characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction"),
-        dur_s        = sum(dur_ms) / 1000.0,
-        device       = max(device.type),
-        browser_name = max(browser.name),
-        country      = max(geo.country.iso_code),
-        start_time   = min(timestamp),
-        by: {session_id = dt.rum.session.id, frontend_name = frontend.name}
-    | fieldsAdd
-        is_bounce    = navs <= 1,
-        has_crash    = false,
-        impact_score = toDouble(err) * 4.0 + if(is_bounce, 10.0, else: 0.0) + max(0.0, (dur_s - 30.0) / 10.0)
+    fetch user.sessions, ${periodClause(days)}
+    | filter isNotNull(frontend.name)${filt}
+    | filter characteristics.has_replay == true
+    | filter dt.rum.user_type == "real_user"
+    | fieldsAdd dur_s        = toDouble(duration) / 1000000000.0
+    | fieldsAdd err          = toLong(coalesce(error.count, 0))
+    | fieldsAdd navs         = toLong(coalesce(navigation_count, 0))
+    | fieldsAdd interactions = toLong(coalesce(user_interaction_count, 0))
+    | fieldsAdd is_bounce    = characteristics.is_bounce == true
+    | fieldsAdd has_crash    = coalesce(error.has_crash, false) == true
+    | fieldsAdd device       = coalesce(device.type, "unknown")
+    | fieldsAdd browser_name = coalesce(browser.name, "unknown")
+    | fieldsAdd country      = coalesce(geo.country.iso_code, "unknown")
+    | fieldsAdd session_id   = dt.rum.session.id
+    | fieldsAdd impact_score = toDouble(err) * 10.0 + if(has_crash, 50.0, else: 0.0) + if(is_bounce, 20.0, else: 0.0)
     | sort impact_score desc
-    | limit 100
+    | limit 50
+    | fields session_id, start_time, dur_s, err, navs, interactions, is_bounce, has_crash, device, browser_name, country, impact_score
   `;
 }

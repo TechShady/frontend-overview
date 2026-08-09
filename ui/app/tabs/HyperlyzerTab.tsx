@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Flex } from "@dynatrace/strato-components/layouts";
 import { Select, TextInput } from "@dynatrace/strato-components-preview/forms";
 import { Button } from "@dynatrace/strato-components/buttons";
 import { Modal } from "@dynatrace/strato-components/overlays";
 import { useSettings, periodClause } from "../SettingsContext";
 import { useDql } from "../useDql";
+import { useTimelapse } from "../TimelapseContext";
+import { useAIInsights, analyzeHyperlyzer } from "../components/AIInsights";
 import {
   RadialHyperChart,
   type DimensionData,
@@ -192,6 +194,33 @@ ${metric.postCompute ?? ""}
 `.trim();
 }
 
+// Bucketed version of buildDimQuery — adds bin(timestamp, bucket) to groupby for timelapse.
+function buildBucketedDimQuery(
+  dim: DimensionKey, frontend: string, periodStr: string,
+  filters: AppliedFilter[], metric: MetricConfig, bucketLabel: string,
+): string {
+  const navFilter = metric.skipNavigationFilter ? "" : "| filter characteristics.has_navigation == true";
+  return `
+fetch user.events, ${periodStr}
+${navFilter}
+| filter dt.rum.user_type != "robot"
+| filter frontend.name == "${escapeStr(frontend)}"
+${filterClauses(filters)}
+${metric.extraFilter ?? ""}
+| fieldsAdd label = ${DIM_FIELD_EXPR[dim]}
+| filter isNotNull(label) and label != ""
+| fieldsAdd bucket_ts = bin(coalesce(start_time, timestamp), ${bucketLabel})
+| fieldsAdd bkt = formatTimestamp(bucket_ts, format: "yyyy-MM-dd HH:mm")
+${metric.preCompute ?? ""}
+| summarize
+    ${metric.summarize},
+    by: {label, bkt}
+${metric.postCompute ?? ""}
+| sort bkt asc
+| limit 50000
+`.trim();
+}
+
 const toItems = (records: any[] | undefined, dim?: DimensionKey): DimensionItem[] => {
   if (!records) return [];
   return records
@@ -232,6 +261,7 @@ const FilterChip: React.FC<{ filter: AppliedFilter; onRemove: () => void }> = ({
 export const HyperlyzerTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
   const frontend = webAppFilter.selected;
+  const tl = useTimelapse();
 
   const [filterText, setFilterText] = useState("");
   const [focusDim, setFocusDim] = useState<DimensionKey>("geo");
@@ -262,6 +292,54 @@ export const HyperlyzerTab: React.FC = () => {
   const focusedFull = useDql(frontend ? buildDimQuery(focusDim, frontend, periodStr, appliedFilters, metric, FULL_LIST_LIMIT) : NOOP,
     [frontend, periodStr, appliedFilters, selectedMetric, focusDim]);
 
+  // Bucketed queries for timelapse — fire only when enabled
+  const tlBucket = tl.bucket;
+  const tlEnabled = tl.enabled;
+  const bktBrowser     = useDql(frontend && tlEnabled ? buildBucketedDimQuery("browser",     frontend, periodStr, appliedFilters, metric, tlBucket) : NOOP, [frontend, periodStr, appliedFilters, selectedMetric, tlEnabled, tlBucket]);
+  const bktOs          = useDql(frontend && tlEnabled ? buildBucketedDimQuery("os",          frontend, periodStr, appliedFilters, metric, tlBucket) : NOOP, [frontend, periodStr, appliedFilters, selectedMetric, tlEnabled, tlBucket]);
+  const bktGeo         = useDql(frontend && tlEnabled ? buildBucketedDimQuery("geo",         frontend, periodStr, appliedFilters, metric, tlBucket) : NOOP, [frontend, periodStr, appliedFilters, selectedMetric, tlEnabled, tlBucket]);
+  const bktUserAction  = useDql(frontend && tlEnabled ? buildBucketedDimQuery("user_action", frontend, periodStr, appliedFilters, metric, tlBucket) : NOOP, [frontend, periodStr, appliedFilters, selectedMetric, tlEnabled, tlBucket]);
+
+  // Parse bucketed records into Map<bucketKey, Map<label, metric_val>>
+  const bktMaps = useMemo(() => {
+    if (!tlEnabled) return null;
+    function parseMap(records: any[] | null | undefined) {
+      const m = new Map<string, Map<string, number>>();
+      (records ?? []).forEach((r: any) => {
+        const bkt = String(r.bkt ?? ""); const label = String(r.label ?? "");
+        const val = Number(r.metric_val ?? 0);
+        if (!bkt || !label) return;
+        let inner = m.get(bkt); if (!inner) { inner = new Map(); m.set(bkt, inner); }
+        inner.set(label, val);
+      });
+      return m;
+    }
+    return {
+      browser:     parseMap(bktBrowser.data?.records),
+      os:          parseMap(bktOs.data?.records),
+      geo:         parseMap(bktGeo.data?.records),
+      user_action: parseMap(bktUserAction.data?.records),
+    };
+  }, [tlEnabled, bktBrowser.data, bktOs.data, bktGeo.data, bktUserAction.data]);
+
+  const bktList = useMemo(() => {
+    if (!bktMaps) return [];
+    const s = new Set<string>();
+    Object.values(bktMaps).forEach(m => m.forEach((_, k) => s.add(k)));
+    return Array.from(s).sort();
+  }, [bktMaps]);
+
+  useEffect(() => {
+    if (!tlEnabled || bktList.length === 0) return;
+    tl.reportBuckets(bktList.length, bktList[Math.min(tl.index, bktList.length - 1)]);
+  }, [tlEnabled, bktList, tl.index]);
+
+  useEffect(() => {
+    if (!tlEnabled) return;
+    tl.reportLoading("hyperlyzer", bktBrowser.loading || bktOs.loading || bktGeo.loading || bktUserAction.loading);
+    return () => tl.reportLoading("hyperlyzer", false);
+  }, [tlEnabled, bktBrowser.loading, bktOs.loading, bktGeo.loading, bktUserAction.loading]);
+
   const dimensions: DimensionData[] = useMemo(() => [
     { key: "os", title: DIM_TITLE.os, items: toItems(os.data?.records, "os") },
     { key: "geo", title: DIM_TITLE.geo, items: toItems(geo.data?.records, "geo") },
@@ -271,12 +349,38 @@ export const HyperlyzerTab: React.FC = () => {
 
   const appMedianMs = Number(median.data?.records?.[0]?.metric_val ?? 0);
 
+  // Timelapse-adjusted dimensions: swap metric_val from current bucket
+  const tlDimensions = useMemo((): DimensionData[] | null => {
+    if (!tlEnabled || !bktMaps || bktList.length === 0) return null;
+    const bktKey = bktList[Math.min(tl.index, bktList.length - 1)];
+    return dimensions.map(d => {
+      const slice = bktMaps[d.key as keyof typeof bktMaps]?.get(bktKey);
+      if (!slice || slice.size === 0) return d;
+      return {
+        ...d,
+        items: d.items.map(item => ({ ...item, durationMs: slice.get(item.label) ?? item.durationMs })),
+      };
+    });
+  }, [tlEnabled, bktMaps, bktList, tl.index, dimensions]);
+
+  const activeDimensions = tlDimensions ?? dimensions;
+
   const isLoading = browser.loading || os.loading || geo.loading || userAction.loading || median.loading || focusedFull.loading;
+
+  // AI Assist
+  const aiFindings = useMemo(() => findings.map(f => {
+    const slower = metric.higherIsBetter ? f.ratio < 1 : f.ratio >= 1;
+    return { dimension: f.dim.title, label: f.item.displayLabel ?? f.item.label, metric: metric.label, ratio: f.ratio, worse: slower };
+  }), [findings, metric]);
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzeHyperlyzer(aiFindings, frontend ?? "app", metric.label, tlEnabled),
+  [aiFindings, frontend, metric.label, tlEnabled]));
   const firstError = browser.error || os.error || geo.error || userAction.error || median.error || focusedFull.error;
 
   const findings = useMemo(() => {
     const all: { dim: DimensionData; item: DimensionItem; ratio: number }[] = [];
-    for (const d of dimensions) {
+    for (const d of activeDimensions) {
       for (const i of d.items) {
         if (appMedianMs > 0) all.push({ dim: d, item: i, ratio: i.durationMs / appMedianMs });
       }
@@ -352,6 +456,7 @@ export const HyperlyzerTab: React.FC = () => {
 
   return (
     <div style={{ padding: 20 }}>
+      {aiPanel}
       {/* Header */}
       <Flex justifyContent="space-between" alignItems="flex-start" gap={16}>
         <div style={{ flex: 1 }}>
@@ -412,7 +517,7 @@ export const HyperlyzerTab: React.FC = () => {
             </div>
           )}
           <RadialHyperChart
-            dimensions={dimensions}
+            dimensions={activeDimensions}
             appMedianMs={appMedianMs}
             size={chartSize}
             focusDim={focusDim}

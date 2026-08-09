@@ -513,3 +513,51 @@ export function analyzePerfBudgets(
 
   return { summary, insights, recommendations };
 }
+
+export function analyzeHyperlyzer(
+  findings: Array<{ dimension: string; label: string; metric: string; ratio: number; worse: boolean }>,
+  appName: string,
+  selectedMetric: string,
+  tlActive: boolean,
+): AIInsightsData {
+  if (findings.length === 0) {
+    return {
+      summary: `No dimension outliers detected for ${appName} on the ${selectedMetric} metric. All segments appear to be performing near the app median.`,
+      insights: [{ severity: "good", icon: "✅", text: "No significant outliers detected across OS, Browser, Geo, or User Action dimensions." }],
+      recommendations: [{ impact: "low", text: "Try switching to a different metric or widening the timeframe to surface hidden patterns." }],
+    };
+  }
+
+  const worstFindings = findings.filter(f => f.worse).sort((a, b) => Math.abs(b.ratio - 1) - Math.abs(a.ratio - 1));
+  const bestFindings  = findings.filter(f => !f.worse).sort((a, b) => Math.abs(b.ratio - 1) - Math.abs(a.ratio - 1));
+  const top = worstFindings[0] ?? findings[0];
+  const factor = top.ratio >= 2
+    ? `${top.ratio.toFixed(1)}× the median`
+    : `${Math.abs((top.ratio - 1) * 100).toFixed(0)}% ${top.worse ? "worse than" : "better than"} the median`;
+  const tlNote = tlActive ? " (Time-Lapse active — reflects the current time bucket.)" : "";
+
+  const summary = `Hyperlyzer found ${worstFindings.length} underperforming segment${worstFindings.length !== 1 ? "s" : ""} and ${bestFindings.length} outperforming segment${bestFindings.length !== 1 ? "s" : ""} for ${appName} on ${selectedMetric}${tlNote}. Top outlier: ${top.dimension} "${top.label}" — ${factor}.`;
+
+  const insights: InsightItem[] = [];
+  for (const f of worstFindings.slice(0, 3)) {
+    insights.push({
+      severity: f.ratio >= 2 ? "critical" : "warning",
+      icon: f.ratio >= 2 ? "🚨" : "⚠️",
+      text: `${f.dimension}: "${f.label}" is ${f.ratio.toFixed(1)}× the app median — ${f.ratio >= 2 ? "severe degradation" : "elevated performance cost"} on ${selectedMetric}.`,
+    });
+  }
+  for (const f of bestFindings.slice(0, 1)) {
+    insights.push({ severity: "good", icon: "✅", text: `${f.dimension}: "${f.label}" performs ${(1 / Math.max(f.ratio, 0.001)).toFixed(1)}× better than the app median on ${selectedMetric}.` });
+  }
+  if (insights.length === 0) insights.push({ severity: "info", icon: "ℹ️", text: `All segments deviate less than 2× the median for ${selectedMetric}.` });
+
+  const recommendations: RecommendationItem[] = [];
+  if (worstFindings.some(f => f.dimension === "Geolocation")) recommendations.push({ impact: "high", text: "Geo outliers typically indicate CDN coverage gaps or high-latency origin routes. Consider adding edge PoPs or using a regional CDN for affected countries." });
+  if (worstFindings.some(f => f.dimension === "Browser")) recommendations.push({ impact: "high", text: "Browser outliers usually point to rendering engine differences. Audit browser-specific polyfills, CSS resets, or Web API fallbacks." });
+  if (worstFindings.some(f => f.dimension === "Operating System")) recommendations.push({ impact: "medium", text: "OS outliers may reflect device capability differences. Profile the page on low-end hardware for the affected OS segment." });
+  if (worstFindings.some(f => f.dimension === "User Action")) recommendations.push({ impact: "high", text: "Slow user actions suggest heavyweight pages or blocking JS. Cross-reference with the Errors tab to check for co-occurring error spikes." });
+  if (recommendations.length === 0) recommendations.push({ impact: "medium", text: "Apply a dimension filter for the worst segment and re-run Hyperlyzer to drill deeper into the root cause." });
+  recommendations.push({ impact: "low", text: "Stack multiple dimension filters using the filter chips to find compounding performance factors unique to a specific user segment." });
+
+  return { summary, insights, recommendations };
+}
