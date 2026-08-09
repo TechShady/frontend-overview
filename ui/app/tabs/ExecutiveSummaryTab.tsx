@@ -1,14 +1,11 @@
 import React, { useMemo, useCallback } from "react";
 import { useAIInsights, analyzeExecutiveSummary } from "../components/AIInsights";
-import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
 import { computeAppScore, computeFleetScore } from "../scoring";
-import { KpiCard } from "../components/KpiCard";
 import { gradeFromScore } from "../components/GradeBadge";
 import { SectionCard, fmt } from "../components/layout";
-import { useFleetSparklines } from "../hooks/useFleetSparklines";
 import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
@@ -104,7 +101,7 @@ const GradeMetricRow: React.FC<{
 // Main component
 // -----------------------------------------------------------------------------
 export const ExecutiveSummaryTab: React.FC = () => {
-  const { timeframeDays, webAppFilter } = useSettings();
+  const { timeframeDays, webAppFilter, setWebAppFilter } = useSettings();
   const sel = webAppFilter.selected;
   const tl = useTimelapse();
   const bucketLabel = tl.enabled ? tl.bucket : undefined;
@@ -113,7 +110,10 @@ export const ExecutiveSummaryTab: React.FC = () => {
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
-  const spk = useFleetSparklines(bucketed.data?.records);
+
+  // Unfiltered queries for Report Card — always shows every app regardless of header filter
+  const allSum = useDql(webAppSummaryQuery(timeframeDays, null), [timeframeDays]);
+  const allVitals = useDql(webVitalsPerAppQuery(timeframeDays, null), [timeframeDays]);
 
   const periodScoredRows = useMemo(() => {
     const vRaw = vitals.data?.records ?? [];
@@ -151,6 +151,37 @@ export const ExecutiveSummaryTab: React.FC = () => {
       return { summary, vitals: vitalsRow, score };
     });
   }, [sum.data, vitals.data]);
+
+  const allAppsScoredRows = useMemo(() => {
+    const vByApp: Record<string, any> = {};
+    (allVitals.data?.records ?? []).forEach((r: any) => { vByApp[String(r.application ?? "")] = r; });
+    return (allSum.data?.records ?? []).map((r: any) => {
+      const app = String(r.application ?? "");
+      const v = vByApp[app] || {};
+      const summary = {
+        application: app,
+        sessions: Number(r.sessions ?? 0),
+        users: Number(r.users ?? 0),
+        actions: Number(r.actions ?? 0),
+        errors: Number(r.errors ?? 0),
+        avgDuration: Number(r.avgDuration ?? 0),
+        apdex: Number(r.apdex ?? 0),
+        satisfied: Number(r.satisfied ?? 0),
+        tolerating: Number(r.tolerating ?? 0),
+        frustrated: Number(r.frustrated ?? 0),
+        errorRate: Number(r.errorRate ?? 0),
+        bounceRate: 0, newUsers: 0, bounces: 0,
+      };
+      const vitalsRow = {
+        application: app,
+        lcpAvg: Number(v.lcpAvg ?? NaN), inpAvg: Number(v.inpAvg ?? NaN),
+        clsAvg: Number(v.clsAvg ?? NaN), ttfbAvg: Number(v.ttfbAvg ?? NaN),
+        fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
+      };
+      const { score } = computeAppScore(vitalsRow, summary);
+      return { summary, score };
+    }).sort((a, b) => (isFinite(b.score) ? b.score : -1) - (isFinite(a.score) ? a.score : -1));
+  }, [allSum.data, allVitals.data]);
 
   // When Timelapse is playing, rebuild scoredRows from the per-bucket per-app data.
   // This makes the grade breakdown, table, and everything downstream animate with playback.
@@ -504,13 +535,44 @@ export const ExecutiveSummaryTab: React.FC = () => {
         ))}
       </div>
 
-      {/* Core Web Vitals KPI cards */}
-      <SectionHeader title="Core Web Vitals" subtitle="Fleet-wide, session-weighted averages." />
-      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-        <KpiCard label="LCP" value={fmt.ms(fleetVitals.lcp)} rawValue={isFinite(fleetVitals.lcp) ? fleetVitals.lcp : undefined} color={cwvLcpClr(fleetVitals.lcp)} subtext="target ≤ 2.5s" sparkline={spk?.lcp} />
-        <KpiCard label="INP" value={fmt.ms(fleetVitals.inp)} rawValue={isFinite(fleetVitals.inp) ? fleetVitals.inp : undefined} color={cwvInpClr(fleetVitals.inp)} subtext="target ≤ 200ms" sparkline={spk?.inp} />
-        <KpiCard label="CLS" value={isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"} rawValue={isFinite(fleetVitals.cls) ? fleetVitals.cls : undefined} color={cwvClsClr(fleetVitals.cls)} subtext="target ≤ 0.1" sparkline={spk?.cls} />
-        <KpiCard label="TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color={cwvTtfbClr(fleetVitals.ttfb)} subtext="target ≤ 800ms" sparkline={spk?.ttfb} />
+      {/* Report Card — always unfiltered, one card per app */}
+      <SectionHeader
+        title="Report Card"
+        subtitle="Per-app grade — always shows all apps. Click a card to focus the rest of this tab, click again to clear."
+      />
+      <div style={{ padding: "0 20px 20px", display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {allAppsScoredRows.map(({ summary, score }) => {
+          const g = gradeFromScore(score);
+          const isSelected = sel === summary.application;
+          return (
+            <div
+              key={summary.application}
+              onClick={() => setWebAppFilter({ selected: isSelected ? null : summary.application })}
+              style={{
+                cursor: "pointer",
+                padding: "12px 16px",
+                borderRadius: 12,
+                border: `2px solid ${isSelected ? g.color : `${g.color}44`}`,
+                background: isSelected ? `${g.color}18` : `${g.color}08`,
+                minWidth: 120,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                transition: "border-color .15s ease, background .15s ease",
+                userSelect: "none",
+              }}
+            >
+              <div style={{ fontSize: 40, fontWeight: 900, color: g.color, lineHeight: 1 }}>{g.letter}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, textAlign: "center", opacity: 0.85, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {summary.application}
+              </div>
+              <div style={{ fontSize: 10, opacity: 0.5, fontFamily: "monospace" }}>
+                {isFinite(score) ? `${score.toFixed(0)}/100` : "—"}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
     </div>

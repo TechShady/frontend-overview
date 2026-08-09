@@ -106,15 +106,22 @@ export function TimelapseTable<T extends Record<string, any>>({
   // -----------------------------------------------------------------------
   const bucketCount = Math.max(0, bucketValues ? Math.max(0, ...Object.values(bucketValues).map((a) => a.length)) : 0);
 
+  // Only rank rows that are actually in `data` — extra keys in bucketValues (e.g. apps
+  // present in a bucketed query but absent from the main summary query) would otherwise
+  // inflate the rank universe and break the sum-of-movements = 0 invariant.
+  const dataKeySet = useMemo(() => new Set(data.map((r) => rowKey(r))), [data, rowKey]);
+
   const ranksPerBucket = useMemo<Record<string, number>[]>(() => {
     if (!bucketValues || bucketCount === 0) return [];
     const out: Record<string, number>[] = [];
     for (let i = 0; i < bucketCount; i++) {
-      const values = Object.entries(bucketValues).map(([k, arr]) => ({ key: k, v: arr[i] ?? null }));
+      const values = Object.entries(bucketValues)
+        .filter(([k]) => dataKeySet.has(k))
+        .map(([k, arr]) => ({ key: k, v: arr[i] ?? null }));
       out.push(rankOf(values, higherIsBetter));
     }
     return out;
-  }, [bucketValues, bucketCount, higherIsBetter]);
+  }, [bucketValues, bucketCount, higherIsBetter, dataKeySet]);
 
   // Current (always-visible) rank derived from `data` sorted by current sort option
   const currentRanks = useMemo<Record<string, number>>(() => {

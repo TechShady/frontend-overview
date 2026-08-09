@@ -141,7 +141,7 @@ const AppHeader: React.FC<{
         </div>
 
         <Strong style={{ fontSize: 12 }}>Web App</Strong>
-        <div style={{ minWidth: 220 }}>
+        <div style={{ minWidth: 300 }}>
           <Select
             name="webAppFilter"
             value={webAppFilter.selected ?? "__ALL__"}

@@ -138,26 +138,14 @@ export const ErrorsTab: React.FC = () => {
 
   const { bucketValuesBySort: errBucket } = useBucketedRanks({
     records: (errBucketed.data?.records ?? []) as any[],
-    rowKeyField: "errorMessage",
+    rowKeyFn: (r: any) => `${r.application}::${r.errorMessage}`,
     bucketField: "bkt",
     metricFields: ["errors", "affectedSessions"],
   });
-  const jsBucketBySort = useMemo(() => {
-    // Key by "application::errorMessage" — but bucketed query has no app column.
-    // Map errorMessage-only bucket data to same array under all app::msg keys.
-    const remap = (src: Record<string, (number | null)[]>): Record<string, (number | null)[]> => {
-      const out: Record<string, (number | null)[]> = {};
-      for (const r of topJsErrors) {
-        const key = `${r.application}::${r.errorMessage}`;
-        out[key] = src[r.errorMessage] ?? [];
-      }
-      return out;
-    };
-    return {
-      errors: remap(errBucket.errors ?? {}),
-      affectedSessions: remap(errBucket.affectedSessions ?? {}),
-    };
-  }, [errBucket, topJsErrors]);
+  const jsBucketBySort = useMemo(() => ({
+    errors: errBucket.errors ?? {},
+    affectedSessions: errBucket.affectedSessions ?? {},
+  }), [errBucket]);
   const jsSortOptions: TLSortOption<typeof topJsErrors[number]>[] = useMemo(() => [
     { value: "errors",           label: "Occurrences",       get: (r) => Number(r.errors),           higherIsBetter: false },
     { value: "affectedSessions", label: "Sessions affected", get: (r) => Number(r.affectedSessions), higherIsBetter: false },

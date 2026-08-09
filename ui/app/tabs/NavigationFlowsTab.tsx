@@ -386,6 +386,15 @@ const NavigationPathsSubTab: React.FC = () => {
   const nodeColorOf = (errRate: number) => errRate > 5 ? RED : errRate > 1 ? YELLOW : BLUE;
   const LINK_COLORS = [BLUE, CYAN, PURPLE, GREEN, ORANGE, YELLOW];
 
+  if (!sel) {
+    return (
+      <div style={{ padding: "60px 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, opacity: 0.75 }}>Select a web app to view navigation paths</div>
+        <div style={{ fontSize: 12, opacity: 0.45 }}>Use the Web App dropdown at the top of the page to choose an app.</div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>

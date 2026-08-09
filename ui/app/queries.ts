@@ -448,7 +448,7 @@ export function errorsBucketedMetricsQuery(days: number, selected: string | null
     | summarize
         errors = count(),
         affectedSessions = countDistinct(dt.rum.session.id),
-        by:{errorMessage = coalesce(error.type, characteristics.classifier, "Unknown"), bkt}
+        by:{application = frontend.name, errorMessage = coalesce(error.type, characteristics.classifier, "Unknown"), bkt}
     | sort errors desc
     | limit 5000
   `;

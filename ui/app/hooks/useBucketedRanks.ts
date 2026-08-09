@@ -10,7 +10,8 @@ import { useMemo } from "react";
 
 export interface UseBucketedRanksOptions<R extends Record<string, any>> {
   records: R[] | null | undefined;
-  rowKeyField: keyof R & string;
+  rowKeyField?: keyof R & string;
+  rowKeyFn?: (r: R) => string;         // composite key; takes precedence over rowKeyField
   bucketField?: keyof R & string;      // default "bkt"
   metricFields: Array<keyof R & string>;
 }
@@ -21,8 +22,9 @@ export interface BucketedRanks {
 }
 
 export function useBucketedRanks<R extends Record<string, any>>({
-  records, rowKeyField, bucketField = "bkt" as any, metricFields,
+  records, rowKeyField, rowKeyFn, bucketField = "bkt" as any, metricFields,
 }: UseBucketedRanksOptions<R>): BucketedRanks {
+  const getKey = rowKeyFn ?? ((r: R) => String(r[rowKeyField!] ?? ""));
   return useMemo(() => {
     if (!records || records.length === 0) return { bucketCount: 0, bucketValuesBySort: {} };
 
@@ -44,7 +46,7 @@ export function useBucketedRanks<R extends Record<string, any>>({
     }
 
     for (const r of records) {
-      const k = String(r[rowKeyField] ?? "");
+      const k = getKey(r);
       if (!k) continue;
       const i = bktIndex[String(r[bucketField] ?? "")];
       if (i == null) continue;
@@ -58,5 +60,6 @@ export function useBucketedRanks<R extends Record<string, any>>({
     }
 
     return { bucketCount, bucketValuesBySort };
-  }, [records, rowKeyField, bucketField, JSON.stringify(metricFields)]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, rowKeyField, rowKeyFn, bucketField, JSON.stringify(metricFields)]);
 }
