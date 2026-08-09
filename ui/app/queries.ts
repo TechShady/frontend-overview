@@ -704,12 +704,15 @@ export function sankeyTimelapseQuery(days: number, selected: string | null, buck
 // Uses user.sessions (not user.events) to get native crash/bounce/replay fields.
 // ---------------------------------------------------------------------------
 export function sessionReplayQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  const appFilter = selected
+    ? `| filter in(frontend.name, "${selected.replace(/"/g, '\\"')}")`
+    : `| filter isNotNull(frontend.name)`;
   return `
     fetch user.sessions, ${periodClause(days)}
-    | filter isNotNull(frontend.name)${filt}
+    ${appFilter}
     | filter characteristics.has_replay == true
     | filter dt.rum.user_type == "real_user"
+    | fieldsAdd app_name     = coalesce(frontend.name, "unknown")
     | fieldsAdd dur_s        = toDouble(duration) / 1000000000.0
     | fieldsAdd err          = toLong(coalesce(error.count, 0))
     | fieldsAdd navs         = toLong(coalesce(navigation_count, 0))
@@ -723,6 +726,6 @@ export function sessionReplayQuery(days: number, selected: string | null): strin
     | fieldsAdd impact_score = toDouble(err) * 10.0 + if(has_crash, 50.0, else: 0.0) + if(is_bounce, 20.0, else: 0.0)
     | sort impact_score desc
     | limit 50
-    | fields session_id, start_time, dur_s, err, navs, interactions, is_bounce, has_crash, device, browser_name, country, impact_score
+    | fields session_id, app_name, start_time, dur_s, err, navs, interactions, is_bounce, has_crash, device, browser_name, country, impact_score
   `;
 }

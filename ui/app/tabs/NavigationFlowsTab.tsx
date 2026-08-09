@@ -1660,19 +1660,33 @@ const WorldMapSubTab: React.FC = () => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
   const [rotLng, setRotLng] = useState(0);
-  const [spinning, setSpinning] = useState(false);
+  const [spinLock, setSpinLock] = useState<-1 | 0 | 1>(0);
   const spinRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdingRef = useRef(false);
 
   const geoData = useDql(geoFullQuery(timeframeDays, sel), [timeframeDays, sel]);
   const tlData  = useDql(tl.enabled ? geoFullBucketedQuery(timeframeDays, sel, bucketLabel) : null, [timeframeDays, sel, tl.enabled, bucketLabel]);
 
   // Spin controls
-  const startSpin = (dir: number) => {
-    if (spinRef.current) clearInterval(spinRef.current);
-    spinRef.current = setInterval(() => setRotLng(r => r + dir * 0.8), 30);
-  };
-  const stopSpin = () => { if (spinRef.current) { clearInterval(spinRef.current); spinRef.current = null; } };
-  useEffect(() => () => stopSpin(), []);
+  const startSpin = useCallback((dir: number) => {
+    if (spinRef.current) return;
+    spinRef.current = setInterval(() => setRotLng(prev => prev + dir * 0.8), 30);
+  }, []);
+  const stopSpin = useCallback(() => { if (spinRef.current) { clearInterval(spinRef.current); spinRef.current = null; } }, []);
+  const handleSpinDown = useCallback((dir: -1 | 1) => {
+    holdingRef.current = true;
+    if (spinLock) { setSpinLock(0); stopSpin(); } else { startSpin(dir); }
+  }, [spinLock, startSpin, stopSpin]);
+  const handleSpinUp = useCallback(() => {
+    holdingRef.current = false;
+    if (!spinLock) stopSpin();
+  }, [spinLock, stopSpin]);
+  const handleSpinLockToggle = useCallback((dir: -1 | 1) => {
+    if (spinLock === dir) { setSpinLock(0); stopSpin(); }
+    else { setSpinLock(dir); stopSpin(); startSpin(dir); }
+    holdingRef.current = false;
+  }, [spinLock, startSpin, stopSpin]);
+  useEffect(() => () => { if (spinRef.current) clearInterval(spinRef.current); }, []);
 
   // Parse timelapse data
   const tlBucketsData = useMemo(() => {
@@ -1814,9 +1828,9 @@ const WorldMapSubTab: React.FC = () => {
 
   const selectedCountry = selectedIso ? dataByIso.get(selectedIso) : null;
 
-  // Globe: orthographic projection (recomputed each frame due to rotLng)
+  // Globe: orthographic projection — clipAngle(90) clips to visible hemisphere, prevents wrap artifacts
   const globeProj = useMemo(() =>
-    geoOrthographic().scale(240).translate([480, 260]).rotate([-rotLng, -15, 0]),
+    geoOrthographic().scale(240).translate([480, 260]).rotate([-rotLng, -15, 0]).clipAngle(90),
   [rotLng]);
   const globePathGen = useMemo(() => geoPath().projection(globeProj), [globeProj]);
 
@@ -1941,34 +1955,47 @@ const WorldMapSubTab: React.FC = () => {
 
           {/* GLOBE */}
           {mapView === "globe" && (
-            <div style={{ background: "rgba(6,10,20,0.95)", borderRadius: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 8 }}>
-                <button onMouseDown={() => { setSpinning(true); startSpin(-1); }} onMouseUp={() => { setSpinning(false); stopSpin(); }} onMouseLeave={() => { if (spinning) { setSpinning(false); stopSpin(); } }}
-                  style={{ padding: "4px 12px", borderRadius: 4, border: "1px solid rgba(128,128,128,0.3)", background: "transparent", color: "rgba(255,255,255,0.7)", cursor: "pointer", userSelect: "none" }}>◀ Spin</button>
-                <button onMouseDown={() => { setSpinning(true); startSpin(1); }} onMouseUp={() => { setSpinning(false); stopSpin(); }} onMouseLeave={() => { if (spinning) { setSpinning(false); stopSpin(); } }}
-                  style={{ padding: "4px 12px", borderRadius: 4, border: "1px solid rgba(128,128,128,0.3)", background: "transparent", color: "rgba(255,255,255,0.7)", cursor: "pointer", userSelect: "none" }}>Spin ▶</button>
-              </div>
+            <div style={{ background: "rgba(6,10,20,0.95)", borderRadius: 12, padding: 12, border: "1px solid rgba(255,255,255,0.06)", position: "relative" }}>
+              <button
+                onMouseDown={() => handleSpinDown(-1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
+                onTouchStart={() => handleSpinDown(-1)} onTouchEnd={handleSpinUp}
+                onDoubleClick={() => handleSpinLockToggle(-1)}
+                title={spinLock === -1 ? "Double-click to unlock" : "Hold to spin · Double-click to lock"}
+                style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === -1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === -1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === -1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
+              >◀</button>
+              <button
+                onMouseDown={() => handleSpinDown(1)} onMouseUp={handleSpinUp} onMouseLeave={handleSpinUp}
+                onTouchStart={() => handleSpinDown(1)} onTouchEnd={handleSpinUp}
+                onDoubleClick={() => handleSpinLockToggle(1)}
+                title={spinLock === 1 ? "Double-click to unlock" : "Hold to spin · Double-click to lock"}
+                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: spinLock === 1 ? "rgba(100,180,255,0.25)" : "rgba(255,255,255,0.08)", border: `1px solid ${spinLock === 1 ? "rgba(100,180,255,0.6)" : "rgba(255,255,255,0.2)"}`, borderRadius: "50%", width: 36, height: 36, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: spinLock === 1 ? "rgba(100,180,255,1)" : "rgba(255,255,255,0.7)", fontSize: 18 }}
+              >▶</button>
               <svg viewBox="0 0 960 520" style={{ width: "100%", display: "block" }}>
                 <defs>
                   <radialGradient id="nf-globe-bg" cx="50%" cy="40%" r="60%">
                     <stop offset="0%" stopColor="#0a1628" />
                     <stop offset="100%" stopColor="#020510" />
                   </radialGradient>
+                  <clipPath id="nf-globe-clip">
+                    <circle cx={480} cy={260} r={242} />
+                  </clipPath>
                 </defs>
                 <circle cx={480} cy={260} r={242} fill="url(#nf-globe-bg)" stroke="rgba(255,255,255,0.06)" strokeWidth={1} />
-                {(worldGeo as any).features.map((feat: any) => {
-                  const numId = String(feat.id);
-                  const alpha2 = ISO_NUMERIC_TO_ALPHA2[numId] ?? "";
-                  const c = dataByIso.get(alpha2);
-                  const d = globePathGen(feat) ?? "";
-                  if (!d) return null;
-                  const fill = c ? (tl.enabled ? getTlColor(alpha2) : getMetricColor(c)) : "rgba(255,255,255,0.04)";
-                  return (
-                    <path key={numId} d={d} fill={fill} stroke="rgba(255,255,255,0.12)" strokeWidth={0.4}>
-                      {c && <title>{decodeName(c.iso, "")}\n{MAP_METRICS.find(m => m.id === metric)?.label}: {formatMetricValue(c)}</title>}
-                    </path>
-                  );
-                })}
+                <g clipPath="url(#nf-globe-clip)">
+                  {(worldGeo as any).features.map((feat: any) => {
+                    const numId = String(feat.id);
+                    const alpha2 = ISO_NUMERIC_TO_ALPHA2[numId] ?? "";
+                    const c = dataByIso.get(alpha2);
+                    const d = globePathGen(feat) ?? "";
+                    if (!d) return null;
+                    const fill = c ? (tl.enabled ? getTlColor(alpha2) : getMetricColor(c)) : "rgba(255,255,255,0.04)";
+                    return (
+                      <path key={numId} d={d} fill={fill} stroke="rgba(255,255,255,0.12)" strokeWidth={0.4}>
+                        {c && <title>{decodeName(c.iso, "")}\n{MAP_METRICS.find(m => m.id === metric)?.label}: {formatMetricValue(c)}</title>}
+                      </path>
+                    );
+                  })}
+                </g>
                 <circle cx={480} cy={260} r={242} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={1} />
               </svg>
             </div>
@@ -2059,6 +2086,7 @@ const SessionReplaySubTab: React.FC = () => {
                   <div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 2 }}>
                       <strong style={{ fontSize: 13 }}>Impact: {score.toFixed(0)}</strong>
+                      {s.app_name && s.app_name !== "unknown" && <span style={{ fontSize: 11, padding: "1px 6px", borderRadius: 3, background: "rgba(69,137,255,0.15)", color: BLUE, fontWeight: 600 }}>{String(s.app_name)}</span>}
                       {Boolean(s.has_crash) && <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 3, background: `${RED}20`, color: RED, fontWeight: 700 }}>CRASH</span>}
                       {Boolean(s.is_bounce) && <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 3, background: `${ORANGE}20`, color: ORANGE, fontWeight: 700 }}>BOUNCE</span>}
                     </div>
@@ -2084,19 +2112,23 @@ const SessionReplaySubTab: React.FC = () => {
         <>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Session Detail Table</h3>
           <div style={{ overflowX: "auto" }}>
-            <DataTable sortable data={sessions.map((s: any) => ({
-              Impact: Number(s.impact_score ?? 0),
-              "Duration (s)": parseFloat(Number(s.dur_s ?? 0).toFixed(1)),
-              Errors: Number(s.err ?? 0),
-              Pages: Number(s.navs ?? 0),
-              Device: String(s.device ?? "—"),
-              Browser: String(s.browser_name ?? "—"),
-              Country: String(s.country ?? "—"),
-              Crash: Boolean(s.has_crash) ? "Yes" : "No",
-              Bounce: Boolean(s.is_bounce) ? "Yes" : "No",
-              _sessionId: String(s.session_id ?? ""),
-              _startTime: s.start_time,
-            }))} columns={[
+            <DataTable sortable data={sessions.map((s: any) => {
+              const st = s.start_time ? encodeURIComponent(String(new Date(String(s.start_time)))) : "";
+              return {
+                "Web App": String(s.app_name ?? "—"),
+                Impact: Number(s.impact_score ?? 0),
+                "Duration (s)": parseFloat(Number(s.dur_s ?? 0).toFixed(1)),
+                Errors: Number(s.err ?? 0),
+                Pages: Number(s.navs ?? 0),
+                Device: String(s.device ?? "—"),
+                Browser: String(s.browser_name ?? "—"),
+                Country: String(s.country ?? "—"),
+                Crash: Boolean(s.has_crash) ? "Yes" : "No",
+                Bounce: Boolean(s.is_bounce) ? "Yes" : "No",
+                _replayUrl: `${ENV_URL}/ui/apps/dynatrace.users.sessions/session-viewer/${s.session_id}/${st}?tf=now-2h%3Bnow&df=1&perspective=general&sort=hasReplay%3Adescending`,
+              };
+            })} columns={[
+              { id: "Web App", header: "Web App", accessor: "Web App", cell: ({ value }: any) => <span style={{ fontWeight: 600, color: BLUE }}>{value}</span> },
               { id: "Impact", header: "Impact", accessor: "Impact", sortType: "number" as any, cell: ({ value }: any) => <strong style={{ color: impactColor(value) }}>{value}</strong> },
               { id: "Duration (s)", header: "Duration (s)", accessor: "Duration (s)", sortType: "number" as any },
               { id: "Errors", header: "Errors", accessor: "Errors", sortType: "number" as any, cell: ({ value }: any) => <span style={{ color: value > 0 ? RED : GREEN }}>{value}</span> },
@@ -2106,15 +2138,9 @@ const SessionReplaySubTab: React.FC = () => {
               { id: "Country", header: "Country", accessor: "Country" },
               { id: "Crash", header: "Crash", accessor: "Crash", cell: ({ value }: any) => <span style={{ color: value === "Yes" ? RED : GREEN }}>{value}</span> },
               { id: "Bounce", header: "Bounce", accessor: "Bounce", cell: ({ value }: any) => <span style={{ color: value === "Yes" ? ORANGE : GREEN }}>{value}</span> },
-              { id: "Replay", header: "Replay", accessor: "_sessionId", cell: ({ value, rowData }: any) => {
-                const st = rowData?._startTime ? encodeURIComponent(String(new Date(String(rowData._startTime)))) : "";
-                return (
-                  <a href={`${ENV_URL}/ui/apps/dynatrace.users.sessions/session-viewer/${value}/${st}?tf=now-2h%3Bnow&df=1&perspective=general`}
-                    target="_blank" rel="noopener noreferrer" style={{ color: CYAN, fontSize: 12, textDecoration: "none" }}>
-                    ▶ Replay
-                  </a>
-                );
-              }},
+              { id: "Replay", header: "Replay", accessor: "_replayUrl", cell: ({ value }: any) => (
+                <a href={value} target="_blank" rel="noopener noreferrer" style={{ color: CYAN, fontSize: 12, textDecoration: "none" }}>▶ Replay</a>
+              )},
             ]} />
           </div>
         </>
