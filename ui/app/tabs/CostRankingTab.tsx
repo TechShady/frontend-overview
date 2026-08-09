@@ -82,7 +82,7 @@ export const CostRankingTab: React.FC = () => {
         </div>
       ) },
     { id: "pct", header: "% of fleet", accessor: "pct", width: 100,
-      cell: ({ row }: any) => <span>{totalCost > 0 ? fmt.pct((row.original.totalCost / totalCost) * 100) : "—"}</span> },
+      cell: ({ row }: any) => <span>{row?.original && totalCost > 0 ? fmt.pct((row.original.totalCost / totalCost) * 100) : "—"}</span> },
   ], [maxCost, totalCost]);
 
   const ranked = rows.slice().sort((a, b) => b.totalCost - a.totalCost);

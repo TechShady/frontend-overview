@@ -6,7 +6,7 @@ import { KpiCard } from "../components/KpiCard";
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
-import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useFleetSparklines, useTlAppOverlay } from "../hooks/useFleetSparklines";
 import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +93,11 @@ export const TrafficEngagementTab: React.FC = () => {
     { value: "bounceRate",        label: "Bounce rate",          get: (r) => Number(r.bounceRate),        higherIsBetter: false },
   ], []);
 
+  const displayRows = useTlAppOverlay(rows, bucketed.data?.records, {
+    keyField: "application", tlEnabled: tl.enabled, tlIndex: tl.index,
+    fields: ["sessions", "users", "actions", "avgDuration"],
+  });
+
   return (
     <div>
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
@@ -104,7 +109,7 @@ export const TrafficEngagementTab: React.FC = () => {
       <SectionCard title="Traffic & engagement — per Web App">
         {sum.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={sum.error} /> : (
           <TimelapseTable
-            data={rows}
+            data={displayRows}
             columns={columns}
             rowKey={(r: any) => String(r.application)}
             firstColumnField="application"

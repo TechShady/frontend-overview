@@ -69,12 +69,16 @@ export const PerfBudgetsTab: React.FC = () => {
     { id: "score", header: "Compliance", accessor: "score", width: 90, sortType: "number" as any,
       cell: ({ value }: any) => <GradePill score={Number(value)} showScore /> },
     { id: "passed", header: "Passed", accessor: "passed", width: 90, sortType: "number" as any,
-      cell: ({ row }: any) => (
-        <span>
-          <span style={{ color: "#0D9C29", fontWeight: 700 }}>{row.original.passed}</span>
-          <span style={{ opacity: 0.6 }}> / {row.original.total}</span>
-        </span>
-      ) },
+      cell: ({ row }: any) => {
+        const o = row?.original;
+        if (!o) return <span style={{ opacity: 0.4 }}>—</span>;
+        return (
+          <span>
+            <span style={{ color: "#0D9C29", fontWeight: 700 }}>{o.passed}</span>
+            <span style={{ opacity: 0.6 }}> / {o.total}</span>
+          </span>
+        );
+      } },
     { id: "lcp",              header: "LCP",           accessor: "lcp",             width: 90,  cell: mkCheckCell("lcp") },
     { id: "inp",              header: "INP",           accessor: "inp",             width: 90,  cell: mkCheckCell("inp") },
     { id: "cls",              header: "CLS",           accessor: "cls",             width: 90,  cell: mkCheckCell("cls") },
@@ -169,7 +173,9 @@ export const PerfBudgetsTab: React.FC = () => {
 
 function mkCheckCell(key: string) {
   return ({ row }: any) => {
-    const chk = (row.original.checks ?? []).find((c: any) => c.key === key);
+    const o = row?.original;
+    if (!o) return <span style={{ opacity: 0.4 }}>—</span>;
+    const chk = (o.checks ?? []).find((c: any) => c.key === key);
     if (!chk || !isFinite(chk.value)) return <span style={{ opacity: 0.4 }}>—</span>;
     const pass = chk.value <= chk.limit;
     const col = pass ? "#0D9C29" : "#C21930";

@@ -9,7 +9,7 @@ import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge"
 import { SectionCard, EmptyState, fmt, InlineBar } from "../components/layout";
 import { TimelapseTable, TLSortOption } from "../components/TimelapseTable";
 import { useBucketedRanks } from "../hooks/useBucketedRanks";
-import { useFleetSparklines } from "../hooks/useFleetSparklines";
+import { useFleetSparklines, useTlAppOverlay } from "../hooks/useFleetSparklines";
 import { useTimelapse } from "../TimelapseContext";
 
 // ---------------------------------------------------------------------------
@@ -232,7 +232,13 @@ export const PerformanceOverviewTab: React.FC = () => {
     })),
   [scoredRows]);
 
-  const maxSessions = Math.max(1, ...tableRows.map((r) => r.sessions));
+  // Swap in per-bucket per-app values when TL is playing so the table matches KPI cards.
+  const displayTableRows = useTlAppOverlay(tableRows, bucketed.data?.records, {
+    keyField: "application", tlEnabled: tl.enabled, tlIndex: tl.index,
+    fields: ["sessions", "users", "actions", "errorRate", "avgDuration", "apdex", "lcp", "inp", "cls", "ttfb", "loadEnd"],
+  });
+
+  const maxSessions = Math.max(1, ...displayTableRows.map((r) => r.sessions));
 
   const columns: any = useMemo(() => [
     { id: "application", header: "Web App", accessor: "application", width: 200,
@@ -418,7 +424,7 @@ export const PerformanceOverviewTab: React.FC = () => {
       >
         {loading ? <EmptyState loading /> : tableRows.length === 0 ? <EmptyState /> : (
           <TimelapseTable
-            data={tableRows}
+            data={displayTableRows}
             columns={columns}
             rowKey={(r: any) => String(r.application)}
             firstColumnField="application"

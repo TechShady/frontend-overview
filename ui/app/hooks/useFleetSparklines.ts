@@ -102,3 +102,44 @@ export function useBucketedSums<K extends string>(
     return out;
   }, [records, fields.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 }
+
+// Overlay per-bucket-per-app values on a base rows list when TL is playing.
+// Base rows are unchanged when TL is off. When on, fields listed in `fields`
+// are replaced with the value for `keyField=app, bkt=buckets[tl.index]`.
+export function useTlAppOverlay<T extends Record<string, any>>(
+  rows: T[],
+  bucketedRecords: any[] | undefined | null,
+  opts: {
+    keyField: keyof T & string;      // e.g. "application"
+    bucketKeyField?: string;         // record field for app match (default = keyField)
+    tlEnabled: boolean;
+    tlIndex: number;
+    fields: readonly (keyof T & string)[];
+  },
+): T[] {
+  const { keyField, bucketKeyField, tlEnabled, tlIndex, fields } = opts;
+  return useMemo(() => {
+    if (!tlEnabled) return rows;
+    const recs = bucketedRecords ?? [];
+    if (recs.length === 0) return rows;
+    const buckets = Array.from(new Set(recs.map((r) => String(r.bkt ?? "")))).filter(Boolean).sort();
+    if (buckets.length === 0) return rows;
+    const bIdx = Math.min(Math.max(tlIndex, 0), buckets.length - 1);
+    const bKey = buckets[bIdx];
+    const bF = bucketKeyField ?? keyField;
+    const byApp: Record<string, any> = {};
+    for (const r of recs) {
+      if (String(r.bkt) === bKey) byApp[String(r[bF])] = r;
+    }
+    return rows.map((r) => {
+      const bucketRow = byApp[String(r[keyField])];
+      if (!bucketRow) return r;
+      const patch: any = {};
+      for (const f of fields) {
+        const v = bucketRow[f as string];
+        if (v != null && v !== "") patch[f] = Number(v);
+      }
+      return { ...r, ...patch };
+    });
+  }, [rows, bucketedRecords, tlEnabled, tlIndex, keyField, bucketKeyField, fields.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+}

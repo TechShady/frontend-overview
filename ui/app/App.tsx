@@ -31,7 +31,6 @@ import { NavigationFlowsTab } from "./tabs/NavigationFlowsTab";
 import { ResourceConsumptionTab } from "./tabs/ResourceConsumptionTab";
 import { CostRankingTab } from "./tabs/CostRankingTab";
 import { TrafficEngagementTab } from "./tabs/TrafficEngagementTab";
-import { GeoDevicesTab } from "./tabs/GeoDevicesTab";
 import { PerfBudgetsTab } from "./tabs/PerfBudgetsTab";
 import { HyperlyzerTab } from "./tabs/HyperlyzerTab";
 import { ProblemsTab } from "./tabs/ProblemsTab";
@@ -68,7 +67,6 @@ const TAB_COMPONENTS: Record<string, React.FC> = {
   "Resource Consumption": ResourceConsumptionTab,
   "Cost & Ranking": CostRankingTab,
   "Traffic & Engagement": TrafficEngagementTab,
-  "Geo & Devices": GeoDevicesTab,
   "Perf Budgets": PerfBudgetsTab,
   "Hyperlyzer": HyperlyzerTab,
   "Problems": ProblemsTab,
