@@ -141,15 +141,16 @@ const AppHeader: React.FC<{
         </div>
 
         <Strong style={{ fontSize: 12 }}>Web App</Strong>
-        <div style={{ width: 420 }}>
-          <Select
-            name="webAppFilter"
-            value={webAppFilter.selected ?? "__ALL__"}
-            onChange={(v: any) => {
-              const first = Array.isArray(v) ? v[0] : v;
-              setWebAppFilter({ selected: !first || first === "__ALL__" ? null : String(first) });
-            }}
-          >
+        {/* eslint-disable-next-line react/no-unknown-property */}
+        <style>{`button[name="webAppFilter"] { min-width: 280px !important; }`}</style>
+        <Select
+          name="webAppFilter"
+          value={webAppFilter.selected ?? "__ALL__"}
+          onChange={(v: any) => {
+            const first = Array.isArray(v) ? v[0] : v;
+            setWebAppFilter({ selected: !first || first === "__ALL__" ? null : String(first) });
+          }}
+        >
             <Select.Content>
               <Select.Option value="__ALL__">All web apps (compare)</Select.Option>
               {webApps.map((a) => (
@@ -157,7 +158,6 @@ const AppHeader: React.FC<{
               ))}
             </Select.Content>
           </Select>
-        </div>
 
         <Strong style={{ fontSize: 12 }}>Timeframe</Strong>
         <div style={{ minWidth: 280 }}>

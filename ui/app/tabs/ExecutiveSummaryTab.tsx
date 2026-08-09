@@ -75,28 +75,26 @@ const SectionHeader: React.FC<{ title: string; subtitle?: string; icon?: React.R
 // Fleet-wide grade bar — one metric with weight, current value, and score bar
 // -----------------------------------------------------------------------------
 const GradeMetricRow: React.FC<{
-  label: string; weight: number; score: number; displayValue: string; color: string;
-  subtext?: React.ReactNode;
-}> = ({ label, weight, score, displayValue, color, subtext }) => {
+  label: string; weight?: number; score: number; displayValue: string; color: string;
+  indent?: boolean;
+}> = ({ label, weight, score, displayValue, color, indent }) => {
   const clamped = Math.max(0, Math.min(100, isFinite(score) ? score : 0));
   return (
-    <div style={{ padding: "6px 0", borderBottom: "1px solid rgba(128,128,128,0.15)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 130, fontSize: 12, fontWeight: 600 }}>
-          {label}
-          <span style={{ opacity: 0.55, fontWeight: 500, marginLeft: 6 }}>({weight}%)</span>
-        </div>
-        <div style={{ flex: 1, height: 8, background: "rgba(128,128,128,0.15)", borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${clamped}%`, background: color, transition: "width .35s ease" }} />
-        </div>
-        <div style={{ width: 96, textAlign: "right", fontSize: 12, fontFamily: "monospace", color, fontWeight: 700 }}>
-          {displayValue}
-        </div>
-        <div style={{ width: 44, textAlign: "right", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
-          {isFinite(score) ? `${clamped.toFixed(0)}/100` : "—"}
-        </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "5px 0", borderBottom: "1px solid rgba(128,128,128,0.1)", paddingLeft: indent ? 16 : 0 }}>
+      <div style={{ width: 130, fontSize: indent ? 11 : 12, fontWeight: indent ? 500 : 600, opacity: indent ? 0.8 : 1 }}>
+        {indent && <span style={{ opacity: 0.4, marginRight: 4 }}>↳</span>}
+        {label}
+        {weight != null && <span style={{ opacity: 0.55, fontWeight: 500, marginLeft: 6 }}>({weight}%)</span>}
       </div>
-      {subtext && <div style={{ paddingLeft: 142, marginTop: 3 }}>{subtext}</div>}
+      <div style={{ flex: 1, height: indent ? 6 : 8, background: "rgba(128,128,128,0.15)", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${clamped}%`, background: color, transition: "width .35s ease" }} />
+      </div>
+      <div style={{ width: 96, textAlign: "right", fontSize: 12, fontFamily: "monospace", color, fontWeight: 700 }}>
+        {displayValue}
+      </div>
+      <div style={{ width: 44, textAlign: "right", fontSize: 11, opacity: 0.7, fontFamily: "monospace" }}>
+        {isFinite(score) ? (indent ? `${clamped.toFixed(0)}%` : `${clamped.toFixed(0)}/100`) : "—"}
+      </div>
     </div>
   );
 };
@@ -438,29 +436,16 @@ export const ExecutiveSummaryTab: React.FC = () => {
     const satPct  = sfTotal > 0 ? (satN / sfTotal) * 100 : 0;
     const tolPct  = sfTotal > 0 ? (tolN / sfTotal) * 100 : 0;
     const fruPct  = sfTotal > 0 ? (fruN / sfTotal) * 100 : 0;
-    const apdexSubtext = sfTotal > 0 ? (
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ flex: 1, height: 5, borderRadius: 3, overflow: "hidden", display: "flex" }}>
-          <div style={{ width: `${satPct}%`, background: GREEN }} />
-          <div style={{ width: `${tolPct}%`, background: YELLOW }} />
-          <div style={{ width: `${fruPct}%`, background: RED }} />
-        </div>
-        <div style={{ fontSize: 10, opacity: 0.65, whiteSpace: "nowrap" }}>
-          <span style={{ color: GREEN }}>▇ {fmt.num(satN)} sat</span>
-          {" · "}
-          <span style={{ color: YELLOW }}>▇ {fmt.num(tolN)} tol</span>
-          {" · "}
-          <span style={{ color: RED }}>▇ {fmt.num(fruN)} fru</span>
-        </div>
-      </div>
-    ) : null;
     return [
-      { label: "Apdex",     weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94),         value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",     color: apdexClr(totals.apdex),       subtext: apdexSubtext },
-      { label: "Error rate",weight: 22, score: scoreLB(totals.errorRate, 0.5, 5),          value: fmt.pct(totals.errorRate),                                   color: errClr(totals.errorRate),     subtext: undefined },
-      { label: "CWV — LCP", weight: 20, score: scoreLB(fleetVitals.lcp, 2500, 4000),       value: fmt.ms(fleetVitals.lcp),                                     color: cwvLcpClr(fleetVitals.lcp),   subtext: undefined },
-      { label: "CWV — INP", weight: 16, score: scoreLB(fleetVitals.inp, 200, 500),         value: fmt.ms(fleetVitals.inp),                                     color: cwvInpClr(fleetVitals.inp),   subtext: undefined },
-      { label: "CWV — CLS", weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25),        value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls), subtext: undefined },
-      { label: "CWV — TTFB",weight: 7,  score: scoreLB(fleetVitals.ttfb, 800, 1800),       value: fmt.ms(fleetVitals.ttfb),                                    color: cwvTtfbClr(fleetVitals.ttfb), subtext: undefined },
+      { label: "Apdex",      weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94),          value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",      color: apdexClr(totals.apdex),       indent: false },
+      { label: "Satisfied",  weight: undefined, score: satPct,                              value: `${satPct.toFixed(0)}% (${fmt.num(satN)})`,                  color: GREEN,                        indent: true  },
+      { label: "Tolerating", weight: undefined, score: tolPct,                              value: `${tolPct.toFixed(0)}% (${fmt.num(tolN)})`,                  color: YELLOW,                       indent: true  },
+      { label: "Frustrated", weight: undefined, score: fruPct,                              value: `${fruPct.toFixed(0)}% (${fmt.num(fruN)})`,                  color: RED,                          indent: true  },
+      { label: "Error rate", weight: 22, score: scoreLB(totals.errorRate, 0.5, 5),          value: fmt.pct(totals.errorRate),                                   color: errClr(totals.errorRate),     indent: false },
+      { label: "CWV — LCP",  weight: 20, score: scoreLB(fleetVitals.lcp, 2500, 4000),       value: fmt.ms(fleetVitals.lcp),                                     color: cwvLcpClr(fleetVitals.lcp),   indent: false },
+      { label: "CWV — INP",  weight: 16, score: scoreLB(fleetVitals.inp, 200, 500),         value: fmt.ms(fleetVitals.inp),                                     color: cwvInpClr(fleetVitals.inp),   indent: false },
+      { label: "CWV — CLS",  weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25),        value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls),  indent: false },
+      { label: "CWV — TTFB", weight: 7,  score: scoreLB(fleetVitals.ttfb, 800, 1800),       value: fmt.ms(fleetVitals.ttfb),                                    color: cwvTtfbClr(fleetVitals.ttfb), indent: false },
     ];
   }, [totals, fleetVitals]);
 
@@ -656,7 +641,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
       <SectionCard title="Grade Breakdown" subtitle="Weighted contributors to the overall fleet grade.">
         <div>
           {gradeMetrics.map((m) => (
-            <GradeMetricRow key={m.label} label={m.label} weight={m.weight} score={m.score} displayValue={m.value} color={m.color} subtext={m.subtext} />
+            <GradeMetricRow key={m.label} label={m.label} weight={m.weight} score={m.score} displayValue={m.value} color={m.color} indent={m.indent} />
           ))}
         </div>
       </SectionCard>
