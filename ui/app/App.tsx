@@ -20,8 +20,9 @@ import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, S
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { useDql } from "./useDql";
 import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
-import { ForecastProvider, ForecastOpener } from "./components/KpiCard";
+import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
 import { ForecastModal } from "./components/ForecastModal";
+import { CorrelationsPanel } from "./components/CorrelationsPanel";
 import appConfig from "../../app.config.json";
 
 import { ExecutiveSummaryTab } from "./tabs/ExecutiveSummaryTab";
@@ -562,6 +563,30 @@ const AppInner: React.FC = () => {
   const [aiOpen, setAiOpen] = useState(false);
   const [timeframeRaw, setTimeframeRaw] = useState<Timeframe | null>(null);
   const [forecastModal, setForecastModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
+  // Correlations: KpiCards auto-register their sparklines here; the panel opens on "Related Metrics".
+  // Registry is keyed by label (last write wins) so we always show the freshest sparkline.
+  const [correlationsRegistry, setCorrelationsRegistry] = useState<Record<string, RelatedMetricEntry>>({});
+  const [correlationsTarget, setCorrelationsTarget] = useState<RelatedMetricEntry | null>(null);
+  const registerCorrelations = useCallback((metrics: RelatedMetricEntry[]) => {
+    setCorrelationsRegistry((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const m of metrics) {
+        const existing = prev[m.label];
+        // Compare by shallow sparkline reference / length to avoid infinite state churn
+        if (!existing || existing.sparkline !== m.sparkline) { next[m.label] = m; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+  const openCorrelations = useCallback((target: RelatedMetricEntry) => setCorrelationsTarget(target), []);
+  // Reset the registry when the tab or timeframe changes so stale sparklines don't persist.
+  useEffect(() => { setCorrelationsRegistry({}); }, [tab, timeframeDays]);
+  const correlationsCtxValue = useMemo(() => ({
+    registry: Object.values(correlationsRegistry),
+    register: registerCorrelations,
+    open: openCorrelations,
+  }), [correlationsRegistry, registerCorrelations, openCorrelations]);
   const tl = useTimelapse();
 
   // Metric-stream key — bump periodically to force query refetch
@@ -680,6 +705,7 @@ const AppInner: React.FC = () => {
         onChangeTimeframe={handleTimeframeChange}
       />
       <ForecastProvider value={openForecast}>
+        <CorrelationsContext.Provider value={correlationsCtxValue}>
         <div style={{ padding: "0 8px" }}>
           {visibleTabs.length === 0 ? (
             <div style={{ padding: 40, textAlign: "center", opacity: 0.6 }}>
@@ -699,11 +725,20 @@ const AppInner: React.FC = () => {
             </Tabs>
           )}
         </div>
+        </CorrelationsContext.Provider>
       </ForecastProvider>
 
       <HelpSheet show={showHelp} onDismiss={() => setShowHelp(false)} />
       <SettingsSheet show={showSettings} onDismiss={() => setShowSettings(false)} />
       <AIAssistSheet show={aiOpen} onDismiss={() => setAiOpen(false)} webApps={webApps} />
+
+      {correlationsTarget && (
+        <CorrelationsPanel
+          target={correlationsTarget}
+          registry={correlationsCtxValue.registry}
+          onClose={() => setCorrelationsTarget(null)}
+        />
+      )}
 
       {forecastModal && (
         <ForecastModal
@@ -713,7 +748,30 @@ const AppInner: React.FC = () => {
           fromMs={fromMs}
           toMs={toMs}
           onClose={() => setForecastModal(null)}
-          getRequeryData={async () => forecastModal.sparkline}
+          getRequeryData={async (analyzeDays, datapointMinutes) => {
+            // We don't run a fresh DQL query here; instead we resample the sparkline that
+            // was captured for the KPI. This lets Datapoints/Analyze dropdowns visibly
+            // change the shape without needing per-KPI DQL wiring.
+            const src = forecastModal.sparkline;
+            if (!src || src.length === 0) return [];
+            // Assume the original sparkline covers the app's currently-selected timeframe
+            // at ~15-minute resolution (our default bucket for short frames). Resample
+            // proportional to the chosen datapoint size, and truncate to analyzeDays.
+            const factor = Math.max(1, Math.round(datapointMinutes / 15));
+            const totalMs = toMs - fromMs;
+            const analyzeMs = analyzeDays * 24 * 3600 * 1000;
+            const fraction = Math.min(1, analyzeMs / Math.max(1, totalMs));
+            const startIdx = Math.max(0, src.length - Math.ceil(src.length * fraction));
+            const window = src.slice(startIdx);
+            if (factor === 1) return window;
+            const out: number[] = [];
+            for (let i = 0; i < window.length; i += factor) {
+              const chunk = window.slice(i, i + factor);
+              if (chunk.length === 0) break;
+              out.push(chunk.reduce((a, b) => a + b, 0) / chunk.length);
+            }
+            return out;
+          }}
         />
       )}
     </>

@@ -115,7 +115,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
   const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
   const spk = useFleetSparklines(bucketed.data?.records);
 
-  const scoredRows = useMemo(() => {
+  const periodScoredRows = useMemo(() => {
     const vRaw = vitals.data?.records ?? [];
     const vByApp: Record<string, any> = {};
     vRaw.forEach((r: any) => { vByApp[String(r.application ?? "")] = r; });
@@ -151,6 +151,45 @@ export const ExecutiveSummaryTab: React.FC = () => {
       return { summary, vitals: vitalsRow, score };
     });
   }, [sum.data, vitals.data]);
+
+  // When Timelapse is playing, rebuild scoredRows from the per-bucket per-app data.
+  // This makes the grade breakdown, table, and everything downstream animate with playback.
+  const scoredRows = useMemo(() => {
+    if (!tl.enabled) return periodScoredRows;
+    const recs = bucketed.data?.records ?? [];
+    if (recs.length === 0) return periodScoredRows;
+    const buckets = Array.from(new Set(recs.map((r: any) => String(r.bkt ?? "")))).filter(Boolean).sort();
+    if (buckets.length === 0) return periodScoredRows;
+    const bKey = buckets[Math.min(Math.max(tl.index, 0), buckets.length - 1)];
+    const byApp: Record<string, any> = {};
+    for (const r of recs as any[]) if (String(r.bkt) === bKey) byApp[String(r.application ?? "")] = r;
+    return periodScoredRows.map((row) => {
+      const b = byApp[row.summary.application];
+      if (!b) return { ...row, summary: { ...row.summary, sessions: 0, users: 0, actions: 0, errors: 0, satisfied: 0, tolerating: 0, frustrated: 0 } };
+      const summary = {
+        ...row.summary,
+        sessions:   Number(b.sessions ?? 0),
+        users:      Number(b.users ?? 0),
+        actions:    Number(b.actions ?? 0),
+        errors:     Number(b.errors ?? 0),
+        avgDuration: Number(b.avgDuration ?? row.summary.avgDuration),
+        apdex:      isFinite(Number(b.apdex)) ? Number(b.apdex) : row.summary.apdex,
+        satisfied:  Number(b.satisfied ?? 0),
+        tolerating: Number(b.tolerating ?? 0),
+        frustrated: Number(b.frustrated ?? 0),
+        errorRate:  Number(b.errorRate ?? row.summary.errorRate),
+      };
+      const vitalsRow = {
+        ...row.vitals,
+        lcpAvg:  isFinite(Number(b.lcp))  ? Number(b.lcp)  : row.vitals.lcpAvg,
+        inpAvg:  isFinite(Number(b.inp))  ? Number(b.inp)  : row.vitals.inpAvg,
+        clsAvg:  isFinite(Number(b.cls))  ? Number(b.cls)  : row.vitals.clsAvg,
+        ttfbAvg: isFinite(Number(b.ttfb)) ? Number(b.ttfb) : row.vitals.ttfbAvg,
+      };
+      const { score } = computeAppScore(vitalsRow, summary);
+      return { summary, vitals: vitalsRow, score };
+    });
+  }, [periodScoredRows, bucketed.data, tl.enabled, tl.index]);
 
   const prevByApp: Record<string, any> = useMemo(() => {
     const out: Record<string, any> = {};

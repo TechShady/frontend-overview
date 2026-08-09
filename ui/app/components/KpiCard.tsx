@@ -287,6 +287,13 @@ export function KpiCard({
     if (correlationsCtx && hasSpark) correlationsCtx.open({ label, sparkline: sparkline!, color, inverted: !effectiveHigherIsBetter });
   };
 
+  // Register this KPI's sparkline with the correlations registry so Related Metrics
+  // can compute cross-metric correlations. Runs once per stable (label, sparkline).
+  useEffect(() => {
+    if (!correlationsCtx || !hasSpark) return;
+    correlationsCtx.register([{ label, sparkline: sparkline!, color, inverted: !effectiveHigherIsBetter }]);
+  }, [correlationsCtx, hasSpark, label, sparkline, color, effectiveHigherIsBetter]);
+
   return (
     <div
       ref={cardRef}
