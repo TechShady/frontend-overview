@@ -1,9 +1,9 @@
 {
   "$schema": "./.dt-app/app.config.schema.json",
-  "environmentUrl": "https://tbo20108.apps.dynatrace.com",
+  "environmentUrl": "https://guu84124.apps.dynatrace.com",
   "app": {
     "name": "Frontend Overview",
-    "version": "0.2.33",
+    "version": "0.2.34",
     "description": "Compare and contrast all web apps in the tenant.",
     "id": "my.frontend.overview.app",
     "icon": "./assets/icon.png",
