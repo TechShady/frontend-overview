@@ -62,10 +62,10 @@ export function webAppSummaryQuery(days: number, selected: string | null, prev =
 
 // Core Web Vitals per web app — from user.events (metric namespace unavailable in guu84124).
 // Values converted from nanoseconds → milliseconds. CLS remains unitless.
-export function webVitalsPerAppQuery(days: number, selected: string | null): string {
+export function webVitalsPerAppQuery(days: number, selected: string | null, prev = false): string {
   const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
   return `
-    fetch user.events, ${periodClause(days)}
+    fetch user.events, ${periodClause(days, prev)}
     | filter isNotNull(frontend.name)${filt}
     | filter isNotNull(web_vitals.largest_contentful_paint)
        or isNotNull(web_vitals.interaction_to_next_paint)
@@ -96,6 +96,32 @@ export function webVitalsPerAppQuery(days: number, selected: string | null): str
         by:{application = frontend.name}
     | sort samples desc
     | limit 200
+  `;
+}
+
+// Device segments — sessions/apdex/errors grouped by app × device type.
+export function deviceSegmentsQuery(days: number, selected: string | null): string {
+  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+  return `
+    fetch user.events, ${periodClause(days)}
+    | filter isNotNull(frontend.name) and isNotNull(device.type)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        actions = countIf(isAction),
+        errors = countIf(characteristics.has_error == true),
+        satisfied = countIf(isAction and dur_ms <= 3000),
+        tolerating = countIf(isAction and dur_ms > 3000 and dur_ms <= 12000),
+        frustrated = countIf(isAction and dur_ms > 12000),
+        avgDuration = avg(if(isAction, dur_ms)),
+        by:{application = frontend.name, deviceType = device.type}
+    | fieldsAdd
+        errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100,
+        apdex = (toDouble(satisfied) + toDouble(tolerating) * 0.5) / (toDouble(satisfied + tolerating + frustrated) + 0.0001)
+    | sort sessions desc
+    | limit 2000
   `;
 }
 

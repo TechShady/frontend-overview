@@ -3,7 +3,7 @@ import { useAIInsights, analyzePerformanceOverview } from "../components/AIInsig
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings, CWV } from "../SettingsContext";
 import { useDql } from "../useDql";
-import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
+import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery, deviceSegmentsQuery } from "../queries";
 import { computeAppScore, computeFleetScore, scoreLowerBetter, PerAppSummary, PerAppVitals } from "../scoring";
 import { KpiCard } from "../components/KpiCard";
 import { GradeBadge, GradePill, gradeFromScore } from "../components/GradeBadge";
@@ -49,6 +49,7 @@ export const PerformanceOverviewTab: React.FC = () => {
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
+  const deviceSeg = useDql(deviceSegmentsQuery(timeframeDays, sel), [timeframeDays, sel]);
 
   const summaries: EnrichedSummary[] = useMemo(() => {
     return (sum.data?.records ?? []).map((r: any) => ({
@@ -410,6 +411,25 @@ export const PerformanceOverviewTab: React.FC = () => {
   }, [tlIdx, fleetSparklines]);
   const displayFleetScore = (tlIdx >= 0 && isFinite(tlFleetScore)) ? tlFleetScore : fleetScore;
 
+  // Device segments (#2) — pivot records into { app → { Mobile/Desktop/Tablet → row } }
+  const deviceRows = useMemo(() => {
+    const byApp: Record<string, Record<string, { sessions: number; apdex: number; errorRate: number }>> = {};
+    for (const r of (deviceSeg.data?.records ?? []) as any[]) {
+      const app = String(r.application ?? "");
+      const dt = String(r.deviceType ?? "");
+      if (!app || !dt) continue;
+      if (!byApp[app]) byApp[app] = {};
+      byApp[app][dt] = { sessions: Number(r.sessions ?? 0), apdex: Number(r.apdex ?? 0), errorRate: Number(r.errorRate ?? 0) };
+    }
+    const deviceTypes = Array.from(new Set((deviceSeg.data?.records ?? []).map((r: any) => String(r.deviceType ?? "")))).filter(Boolean).sort();
+    const apps = Object.keys(byApp).sort((a, b) => {
+      const aSessions = Object.values(byApp[a]).reduce((s, r) => s + r.sessions, 0);
+      const bSessions = Object.values(byApp[b]).reduce((s, r) => s + r.sessions, 0);
+      return bSessions - aSessions;
+    });
+    return { byApp, deviceTypes, apps };
+  }, [deviceSeg.data]);
+
   return (
     <div>
       {aiPanel}
@@ -467,6 +487,58 @@ export const PerformanceOverviewTab: React.FC = () => {
             defaultSort="sessions"
             bucketValuesBySort={bucketBySort}
           />
+        )}
+      </SectionCard>
+
+      {/* Device Segments (#2) */}
+      <SectionCard
+        title="Device Segments"
+        subtitle="Apdex and error rate broken down by device type — unique to Dynatrace's single-agent RUM model."
+      >
+        {deviceSeg.loading ? <EmptyState loading /> : deviceRows.apps.length === 0 ? <EmptyState label="No device data available." /> : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid rgba(128,128,128,0.2)" }}>
+                  <th style={{ textAlign: "left", padding: "6px 12px", opacity: 0.7, fontWeight: 600 }}>Web App</th>
+                  {deviceRows.deviceTypes.map(dt => (
+                    <th key={dt} colSpan={2} style={{ textAlign: "center", padding: "6px 12px", opacity: 0.7, fontWeight: 600 }}>{dt}</th>
+                  ))}
+                </tr>
+                <tr style={{ borderBottom: "1px solid rgba(128,128,128,0.15)" }}>
+                  <th />
+                  {deviceRows.deviceTypes.map(dt => (
+                    <React.Fragment key={dt}>
+                      <th style={{ textAlign: "right", padding: "3px 8px", opacity: 0.5, fontWeight: 500, fontSize: 11 }}>Apdex</th>
+                      <th style={{ textAlign: "right", padding: "3px 8px", opacity: 0.5, fontWeight: 500, fontSize: 11 }}>Err %</th>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {deviceRows.apps.map(app => (
+                  <tr key={app} style={{ borderBottom: "1px solid rgba(128,128,128,0.08)" }}>
+                    <td style={{ padding: "6px 12px", fontWeight: 600, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app}</td>
+                    {deviceRows.deviceTypes.map(dt => {
+                      const seg = deviceRows.byApp[app]?.[dt];
+                      const apdexCol = !seg ? "rgba(128,128,128,0.4)" : seg.apdex >= 0.85 ? "#0D9C29" : seg.apdex >= 0.7 ? "#F9A825" : "#C21930";
+                      const errCol = !seg ? "rgba(128,128,128,0.4)" : seg.errorRate < 0.5 ? "#0D9C29" : seg.errorRate < 5 ? "#F9A825" : "#C21930";
+                      return (
+                        <React.Fragment key={dt}>
+                          <td style={{ textAlign: "right", padding: "6px 8px", color: apdexCol, fontWeight: 700, fontFamily: "monospace" }}>
+                            {seg ? seg.apdex.toFixed(2) : "—"}
+                          </td>
+                          <td style={{ textAlign: "right", padding: "6px 8px", color: errCol, fontFamily: "monospace" }}>
+                            {seg ? `${seg.errorRate.toFixed(1)}%` : "—"}
+                          </td>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
 

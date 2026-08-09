@@ -109,6 +109,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
+  const prevVitals = useDql(webVitalsPerAppQuery(timeframeDays, sel, true), [timeframeDays, sel]);
   const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
 
   // Unfiltered queries for Report Card — always shows every app regardless of header filter
@@ -273,6 +274,106 @@ export const ExecutiveSummaryTab: React.FC = () => {
       errorRate: actions > 0 ? (errors / actions) * 100 : 0,
     };
   }, [prevByApp]);
+
+  // Previous-period per-app scores for "What Changed" comparison (#1)
+  const prevScoredRows = useMemo(() => {
+    const pvByApp: Record<string, any> = {};
+    (prevVitals.data?.records ?? []).forEach((r: any) => { pvByApp[String(r.application ?? "")] = r; });
+    return Object.entries(prevByApp).map(([app, rr]) => {
+      const r = rr as any;
+      const v = pvByApp[app] || {};
+      const summary = {
+        application: app, sessions: Number(r.sessions ?? 0), users: Number(r.users ?? 0),
+        actions: Number(r.actions ?? 0), errors: Number(r.errors ?? 0),
+        avgDuration: Number(r.avgDuration ?? 0), apdex: Number(r.apdex ?? 0),
+        satisfied: Number(r.satisfied ?? 0), tolerating: Number(r.tolerating ?? 0),
+        frustrated: Number(r.frustrated ?? 0), errorRate: Number(r.errorRate ?? 0),
+        bounceRate: 0, newUsers: 0, bounces: 0,
+      };
+      const vitalsRow = {
+        application: app,
+        lcpAvg: Number(v.lcpAvg ?? NaN), inpAvg: Number(v.inpAvg ?? NaN),
+        clsAvg: Number(v.clsAvg ?? NaN), ttfbAvg: Number(v.ttfbAvg ?? NaN),
+        fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
+      };
+      const { score } = computeAppScore(vitalsRow, summary);
+      return { application: app, score, apdex: summary.apdex, errorRate: summary.errorRate, avgDuration: summary.avgDuration };
+    });
+  }, [prevByApp, prevVitals.data]);
+
+  // Business Impact bullets (#3)
+  const impactBullets = useMemo(() => {
+    const bullets: { text: string; positive: boolean }[] = [];
+    if (prevTotals.sessions < 10) return bullets;
+    const sessionDelta = totals.sessions - prevTotals.sessions;
+    const sessionPct = (Math.abs(sessionDelta) / prevTotals.sessions) * 100;
+    if (sessionPct >= 5) bullets.push({
+      text: `${sessionDelta > 0 ? "+" : ""}${Math.round(sessionPct)}% sessions vs prior period — ${fmt.num(Math.abs(sessionDelta))} ${sessionDelta > 0 ? "more" : "fewer"} visitors`,
+      positive: sessionDelta > 0,
+    });
+    if (prevTotals.actions > 0) {
+      const rateDelta = totals.errorRate - prevTotals.errorRate;
+      if (Math.abs(rateDelta) >= 0.2) {
+        const affected = Math.abs(Math.round((rateDelta / 100) * totals.sessions));
+        bullets.push({
+          text: `Error rate ${rateDelta > 0 ? "up" : "down"} ${Math.abs(rateDelta).toFixed(1)}pp — ~${fmt.num(affected)} ${rateDelta > 0 ? "more" : "fewer"} sessions hit errors`,
+          positive: rateDelta < 0,
+        });
+      }
+    }
+    if (isFinite(totals.apdex) && isFinite(prevTotals.apdex)) {
+      const delta = totals.apdex - prevTotals.apdex;
+      if (Math.abs(delta) >= 0.03) {
+        const fruDelta = Math.abs(Math.round(delta * totals.sessions));
+        bullets.push({
+          text: `Apdex ${delta > 0 ? "improved" : "declined"} ${Math.abs(delta * 100).toFixed(0)} pts — ~${fmt.num(fruDelta)} ${delta < 0 ? "more frustrated" : "fewer frustrated"} sessions`,
+          positive: delta > 0,
+        });
+      }
+    }
+    if (isFinite(totals.avgDur) && isFinite(prevTotals.avgDur) && prevTotals.avgDur > 0) {
+      const delta = totals.avgDur - prevTotals.avgDur;
+      const pct = Math.abs((delta / prevTotals.avgDur) * 100);
+      if (pct >= 10 && Math.abs(delta) >= 300) bullets.push({
+        text: `Avg load time ${delta > 0 ? "up" : "down"} ${Math.abs(delta / 1000).toFixed(1)}s — users ${delta > 0 ? "waiting longer" : "experiencing faster pages"}`,
+        positive: delta < 0,
+      });
+    }
+    return bullets;
+  }, [totals, prevTotals]);
+
+  // What Changed per-app (#1)
+  const whatChanged = useMemo(() => {
+    if (!prevScoredRows.length) return [];
+    const prevMap: Record<string, typeof prevScoredRows[number]> = {};
+    prevScoredRows.forEach(r => { prevMap[r.application] = r; });
+    return scoredRows
+      .filter(r => isFinite(r.score) && r.summary.sessions >= 5)
+      .map(r => {
+        const p = prevMap[r.summary.application];
+        if (!p || !isFinite(p.score)) return null;
+        const delta = r.score - p.score;
+        if (Math.abs(delta) < 4) return null;
+        const curr = gradeFromScore(r.score);
+        const prevGrade = gradeFromScore(p.score);
+        // Identify the biggest driver
+        let driver = "";
+        const apdexD = r.summary.apdex - p.apdex;
+        const errD = r.summary.errorRate - p.errorRate;
+        const durD = r.summary.avgDuration - p.avgDuration;
+        const drivers = [
+          { label: "Apdex", delta: apdexD, positive: apdexD > 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (v * 100).toFixed(0) + " pts" },
+          { label: "Error rate", delta: -errD, positive: errD < 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (-v).toFixed(1) + "pp" },
+          { label: "Load time", delta: -durD, positive: durD < 0, unit: "", fmt: (v: number) => (v > 0 ? "+" : "") + (-v / 1000).toFixed(1) + "s" },
+        ].filter(d => !isNaN(d.delta));
+        const top = drivers.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+        if (top) driver = `${top.label} ${top.fmt(top.delta)}`;
+        return { application: r.summary.application, delta, curr, prevGrade, driver, gradeMoved: curr.letter !== prevGrade.letter };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 10);
+  }, [scoredRows, prevScoredRows]);
 
   const fleetVitals = useMemo(() => {
     let lN = 0, lW = 0, iN = 0, iW = 0, cN = 0, cW = 0, tN = 0, tW = 0;
@@ -534,6 +635,44 @@ export const ExecutiveSummaryTab: React.FC = () => {
           <div key={i} style={{ fontSize: 13, lineHeight: 1.6, margin: "4px 0" }}>{line}</div>
         ))}
       </div>
+
+      {/* Business Impact (#3) */}
+      {impactBullets.length > 0 && (
+        <>
+          <SectionHeader title="Business Impact" subtitle="How this period compares to the previous one — in user terms." />
+          <div style={{ margin: "0 20px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+            {impactBullets.map((b, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 8, background: b.positive ? `${GREEN}0d` : `${RED}0d`, border: `1px solid ${b.positive ? GREEN : RED}33` }}>
+                <span style={{ fontSize: 16, color: b.positive ? GREEN : RED }}>{b.positive ? "↑" : "↓"}</span>
+                <span style={{ fontSize: 13 }}>{b.text}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* What Changed per-app (#1) */}
+      {whatChanged.length > 0 && (
+        <>
+          <SectionHeader title="What Changed" subtitle="Apps with the largest score movement vs the prior period." />
+          <div style={{ margin: "0 20px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+            {whatChanged.map((w) => (
+              <div key={w.application} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderRadius: 8, background: "rgba(128,128,128,0.06)", border: "1px solid rgba(128,128,128,0.12)" }}>
+                <div style={{ minWidth: 170, fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.application}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 20, fontWeight: 900 }}>
+                  <span style={{ color: w.prevGrade.color, opacity: 0.6 }}>{w.prevGrade.letter}</span>
+                  <span style={{ fontSize: 14, opacity: 0.4 }}>→</span>
+                  <span style={{ color: w.curr.color }}>{w.curr.letter}</span>
+                </div>
+                <div style={{ fontSize: 12, fontFamily: "monospace", color: w.delta > 0 ? GREEN : RED, fontWeight: 700, minWidth: 60 }}>
+                  {w.delta > 0 ? "+" : ""}{w.delta.toFixed(0)} pts
+                </div>
+                {w.driver && <div style={{ fontSize: 11, opacity: 0.6 }}>{w.driver}</div>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Report Card — always unfiltered, one card per app */}
       <SectionHeader
