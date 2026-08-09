@@ -8,12 +8,9 @@ export const ALL_TABS: string[] = [
   "Performance Overview",
   "Errors & Reliability",
   "Navigation & Flows",
-  "Resource Consumption",
   "Cost & Ranking",
-  "Traffic & Engagement",
   "Perf Budgets",
   "Hyperlyzer",
-  "Problems",
 ];
 
 export const TIMEFRAME_OPTIONS: { label: string; value: number }[] = [

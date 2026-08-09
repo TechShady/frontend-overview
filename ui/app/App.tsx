@@ -24,18 +24,16 @@ import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
 import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
 import { ForecastModal } from "./components/ForecastModal";
 import { CorrelationsPanel } from "./components/CorrelationsPanel";
+import { AIInsightsContext } from "./components/AIInsights";
 import appConfig from "../../app.config.json";
 
 import { ExecutiveSummaryTab } from "./tabs/ExecutiveSummaryTab";
 import { PerformanceOverviewTab } from "./tabs/PerformanceOverviewTab";
 import { ErrorsTab } from "./tabs/ErrorsTab";
 import { NavigationFlowsTab } from "./tabs/NavigationFlowsTab";
-import { ResourceConsumptionTab } from "./tabs/ResourceConsumptionTab";
 import { CostRankingTab } from "./tabs/CostRankingTab";
-import { TrafficEngagementTab } from "./tabs/TrafficEngagementTab";
 import { PerfBudgetsTab } from "./tabs/PerfBudgetsTab";
 import { HyperlyzerTab } from "./tabs/HyperlyzerTab";
-import { ProblemsTab } from "./tabs/ProblemsTab";
 
 const APP_VERSION_LABEL = appConfig.app.version;
 
@@ -66,12 +64,9 @@ const TAB_COMPONENTS: Record<string, React.FC> = {
   "Performance Overview": PerformanceOverviewTab,
   "Errors & Reliability": ErrorsTab,
   "Navigation & Flows": NavigationFlowsTab,
-  "Resource Consumption": ResourceConsumptionTab,
   "Cost & Ranking": CostRankingTab,
-  "Traffic & Engagement": TrafficEngagementTab,
   "Perf Budgets": PerfBudgetsTab,
   "Hyperlyzer": HyperlyzerTab,
-  "Problems": ProblemsTab,
 };
 
 // ---------------------------------------------------------------------------
@@ -429,49 +424,46 @@ const AppHeader: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// AI Assist side panel — lightweight sheet (Sheet already handles overlay + focus)
-// ---------------------------------------------------------------------------
-const AIAssistSheet: React.FC<{ show: boolean; onDismiss: () => void; webApps: { name: string; sessions: number }[] }> = ({ show, onDismiss, webApps }) => {
-  const { webAppFilter, timeframeDays } = useSettings();
-  const target = webAppFilter.selected ?? "your fleet";
-  const activity = webApps.reduce((a, b) => a + (b.sessions || 0), 0);
-  return (
-    <Sheet title="AI Assist" show={show} onDismiss={onDismiss} actions={<Button variant="emphasized" onClick={onDismiss}>Close</Button>}>
-      <div style={{ padding: "4px 0" }}>
-        <Paragraph>
-          <Strong>Scope:</Strong> {target}
-          <br />
-          <Strong>Window:</Strong> last {timeframeDays >= 1 ? `${timeframeDays} day${timeframeDays === 1 ? "" : "s"}` : `${Math.round(timeframeDays * 24)}h`}
-          <br />
-          <Strong>Sessions in scope:</Strong> {activity.toLocaleString()}
-        </Paragraph>
-        <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: "1px solid rgba(165,110,255,0.35)", background: "rgba(165,110,255,0.08)" }}>
-          <Strong style={{ color: "#A56EFF" }}>Suggested next steps</Strong>
-          <ul style={{ marginTop: 8, lineHeight: 1.6, fontSize: 13 }}>
-            <li>Open <em>Executive Summary</em> to grade every web app on Core Web Vitals + error/bounce.</li>
-            <li>Open <em>Resource Consumption</em> to see which app is heaviest per session.</li>
-            <li>Enable <em>Time-Lapse</em> in the header to replay activity bucket by bucket.</li>
-          </ul>
-        </div>
-      </div>
-    </Sheet>
-  );
-};
-
-// ---------------------------------------------------------------------------
 // Help panel
 // ---------------------------------------------------------------------------
 const HelpSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, onDismiss }) => (
   <Sheet title="Frontend Overview — Help" show={show} onDismiss={onDismiss} actions={<Button variant="emphasized" onClick={onDismiss}>Close</Button>}>
-    <div style={{ padding: "4px 0" }}>
-      <Paragraph>This app compares and contrasts every RUM-instrumented web application in your Dynatrace tenant.</Paragraph>
-      <Paragraph><Strong>Executive Summary</Strong> — grades each web app on a 0–100 composite (LCP, INP, CLS, TTFB, error rate, bounce).</Paragraph>
-      <Paragraph><Strong>Web Vitals</Strong> — Core Web Vitals distributions per app.</Paragraph>
-      <Paragraph><Strong>Errors & Reliability</Strong> — JS errors, error rate, affected sessions.</Paragraph>
-      <Paragraph><Strong>Resource Consumption</Strong> — bytes, requests, third-party impact per app.</Paragraph>
-      <Paragraph><Strong>Time-Lapse</Strong> (header toggle) — replay activity in configurable buckets.</Paragraph>
-      <Paragraph><Strong>Metric-Stream</Strong> (header) — auto-refresh cadence.</Paragraph>
-      <Paragraph><Strong>Settings</Strong> — show/hide any tab and tune perf-budget thresholds.</Paragraph>
+    <div style={{ padding: "4px 0", lineHeight: 1.6 }}>
+      <Paragraph style={{ marginBottom: 16 }}>This app compares and contrasts every RUM-instrumented web application in your Dynatrace tenant. Use the web app filter in the header to scope all tabs to a single application.</Paragraph>
+
+      <Strong style={{ fontSize: 14, display: "block", marginBottom: 8 }}>Tabs</Strong>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+        {[
+          { name: "Executive Summary", desc: "Grades every web app on a 0–100 composite score (LCP, INP, CLS, TTFB, error rate, bounce). Trend lines show improvement/degradation over time.", subTabs: null },
+          { name: "Performance Overview", desc: "Fleet-wide Core Web Vitals per app — LCP, INP, CLS, TTFB with color-coded pass/fail indicators. Rank apps by any metric.", subTabs: null },
+          { name: "Errors & Reliability", desc: "Error rates, total error counts, and sessions with errors per web app. Also shows the top JavaScript errors across your fleet with affected session counts.", subTabs: null },
+          { name: "Navigation & Flows", desc: "Five sub-tabs for deep navigation analysis:", subTabs: ["Navigation Paths — force-directed graph of page transitions + page performance table", "Sankey — multi-format flow diagram (Classic, Gradient, Directed, Alluvial, State Machine, Chord, Heatmap) with click-to-drill detail panel", "Geo Heatmap — Apdex and session counts by country", "Maps — interactive world choropleth + globe for geographic metrics", "Session Replay — sessions ranked by impact score"] },
+          { name: "Cost & Ranking", desc: "Creative cost model: assigns $ estimates per byte, request, and RUM event to rank web apps by estimated infrastructure cost. Adjust rate assumptions live.", subTabs: null },
+          { name: "Perf Budgets", desc: "Set custom thresholds for LCP, INP, CLS, TTFB, bytes/page, requests/page, and error rate. Each web app is graded pass/fail per metric.", subTabs: null },
+          { name: "Hyperlyzer", desc: "Multidimensional radial exploration of a single web app across OS, browser, geo, and user action dimensions. Requires a specific app to be selected in the header.", subTabs: null },
+        ].map(tab => (
+          <div key={tab.name} style={{ padding: "10px 12px", background: "rgba(128,128,128,0.05)", borderRadius: 6, border: "1px solid rgba(128,128,128,0.12)" }}>
+            <Strong style={{ fontSize: 13 }}>{tab.name}</Strong>
+            <Text style={{ fontSize: 12, opacity: 0.8, display: "block", marginTop: 3 }}>{tab.desc}</Text>
+            {tab.subTabs && (
+              <ul style={{ margin: "6px 0 0 16px", padding: 0, fontSize: 12, opacity: 0.7, lineHeight: 1.7 }}>
+                {tab.subTabs.map((st, i) => <li key={i}>{st}</li>)}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <Strong style={{ fontSize: 14, display: "block", marginBottom: 8 }}>Header Controls</Strong>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, opacity: 0.85 }}>
+        <div><Strong>Web App filter</Strong> — scope all tabs to a specific application, or leave blank for fleet-wide view.</div>
+        <div><Strong>Timeframe</Strong> — select data window from 2 hours to 90 days.</div>
+        <div><Strong>Time-Lapse</Strong> — replay activity bucket-by-bucket. Rank tables animate with movement indicators and green/red flicker when apps change rank.</div>
+        <div><Strong>Metric-Stream</Strong> — auto-refresh cadence for live monitoring.</div>
+        <div><Strong>AI Assist</Strong> — context-aware analysis for the active tab: summary, color-coded insights, and prioritized recommendations with streaming animation.</div>
+        <div><Strong>Settings</Strong> — show/hide tabs and adjust performance budget thresholds.</div>
+      </div>
     </div>
   </Sheet>
 );
@@ -498,12 +490,23 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
               {visibleCount} of {ALL_TABS.length} tabs visible. Hidden tabs won't appear in the navigation.
             </Text>
           </div>
-          <div style={{ padding: "10px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px" }}>
-            {ALL_TABS.map((name) => (
-              <label key={name} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, userSelect: "none" }}>
+          <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {([
+              { name: "Executive Summary", sub: null },
+              { name: "Performance Overview", sub: null },
+              { name: "Errors & Reliability", sub: null },
+              { name: "Navigation & Flows", sub: "Sub-tabs: Navigation Paths · Sankey · Geo Heatmap · Maps · Session Replay" },
+              { name: "Cost & Ranking", sub: null },
+              { name: "Perf Budgets", sub: null },
+              { name: "Hyperlyzer", sub: "Requires a single web app selected in the header" },
+            ] as { name: string; sub: string | null }[]).map(({ name, sub }) => (
+              <div key={name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }} onClick={() => toggleTab(name)}>
                 <Switch value={!!tabVisibility[name]} onChange={() => toggleTab(name)} />
-                <span style={{ opacity: tabVisibility[name] ? 1 : 0.55 }}>{name}</span>
-              </label>
+                <div style={{ paddingTop: 2 }}>
+                  <span style={{ fontSize: 13, opacity: tabVisibility[name] ? 1 : 0.5, userSelect: "none" }}>{name}</span>
+                  {sub && <Text style={{ fontSize: 11, opacity: 0.5, display: "block", marginTop: 1 }}>{sub}</Text>}
+                </div>
+              </div>
             ))}
           </div>
           <div style={{ padding: "8px 12px", borderTop: "1px solid rgba(128,128,128,0.15)", display: "flex", justifyContent: "flex-end" }}>
@@ -683,6 +686,8 @@ const AppInner: React.FC = () => {
     if (sparkline && sparkline.length > 1) setForecastModal({ label, sparkline, color });
   }, []);
 
+  const aiContextValue = useMemo(() => ({ open: aiOpen, close: () => setAiOpen(false) }), [aiOpen]);
+
   const anchor = timeframeAnchorMs(timeframeRaw);
   const tfDurMs = timeframeDays * 86400000;
   const fromMs = (anchor ?? Date.now()) - tfDurMs;
@@ -696,7 +701,7 @@ const AppInner: React.FC = () => {
   }, [setTimeframeDays]);
 
   return (
-    <>
+    <AIInsightsContext.Provider value={aiContextValue}>
       <AppHeader
         onOpenHelp={() => setShowHelp(true)}
         onOpenSettings={() => setShowSettings(true)}
@@ -732,7 +737,6 @@ const AppInner: React.FC = () => {
 
       <HelpSheet show={showHelp} onDismiss={() => setShowHelp(false)} />
       <SettingsSheet show={showSettings} onDismiss={() => setShowSettings(false)} />
-      <AIAssistSheet show={aiOpen} onDismiss={() => setAiOpen(false)} webApps={webApps} />
 
       {correlationsTarget && (
         <CorrelationsPanel
@@ -836,7 +840,7 @@ const AppInner: React.FC = () => {
           }}
         />
       )}
-    </>
+    </AIInsightsContext.Provider>
   );
 };
 

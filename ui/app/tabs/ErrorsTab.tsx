@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
+import { useAIInsights, analyzeErrors } from "../components/AIInsights";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { errorsPerAppQuery, jsErrorsQuery, webAppBucketedMetricsQuery, errorsBucketedMetricsQuery } from "../queries";
@@ -36,6 +37,26 @@ export const ErrorsTab: React.FC = () => {
     })),
   [perApp.data]);
 
+  // Overlay per-bucket values on rows when timelapse is playing.
+  const displayRows = useMemo(() => {
+    if (!tl.enabled) return rows;
+    const recs = (bucketed.data?.records ?? []) as any[];
+    if (!recs.length) return rows;
+    const buckets = [...new Set(recs.map((r) => String(r.bkt ?? "")))].filter(Boolean).sort();
+    if (!buckets.length) return rows;
+    const bKey = buckets[Math.min(Math.max(tl.index, 0), buckets.length - 1)];
+    const byApp: Record<string, any> = {};
+    recs.forEach((r) => { if (String(r.bkt) === bKey) byApp[String(r.application ?? "")] = r; });
+    return rows.map((r) => {
+      const b = byApp[r.application];
+      if (!b) return r;
+      const totalActions = Number(b.actions ?? r.totalActions);
+      const totalErrors = Number(b.errors ?? r.totalErrors);
+      const errorRate = Number(b.errorRate ?? r.errorRate);
+      return { ...r, totalActions, totalErrors, errorRate };
+    });
+  }, [rows, bucketed.data, tl.enabled, tl.index]);
+
   const prevBy = useMemo(() => {
     const out: Record<string, any> = {};
     (prev.data?.records ?? []).forEach((r: any) => { out[String(r.application)] = r; });
@@ -49,6 +70,13 @@ export const ErrorsTab: React.FC = () => {
 
   const worst = rows.slice().sort((a, b) => b.errorRate - a.errorRate)[0];
   const maxErr = Math.max(1, ...rows.map((r) => r.totalErrors));
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzeErrors(
+      displayRows.map((r) => ({ application: r.application, errorRate: r.errorRate, totalErrors: r.totalErrors })),
+      totalErrs,
+    ),
+  [displayRows, totalErrs]));
 
   const columns: any = useMemo(() => [
     { id: "application", header: "Web App", accessor: "application", width: 220,
@@ -137,6 +165,7 @@ export const ErrorsTab: React.FC = () => {
 
   return (
     <div>
+      {aiPanel}
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
         <KpiCard label="Total errors" value={fmt.num(totalErrs)} rawValue={totalErrs} prevRawValue={prevTotalErrs} color="#C21930" sparkline={spk?.errors} />
         <KpiCard label="Overall error rate" value={fmt.pct(totalActions > 0 ? (totalErrs / totalActions) * 100 : 0)}
@@ -150,7 +179,7 @@ export const ErrorsTab: React.FC = () => {
       <SectionCard title="Error rate — per Web App" subtitle="Which web app is failing the most? Sort by error rate to find highest-impact issues.">
         {perApp.loading ? <EmptyState loading /> : rows.length === 0 ? <EmptyState error={perApp.error} /> : (
           <TimelapseTable
-            data={rows}
+            data={displayRows}
             columns={columns}
             rowKey={(r: any) => String(r.application)}
             firstColumnField="application"

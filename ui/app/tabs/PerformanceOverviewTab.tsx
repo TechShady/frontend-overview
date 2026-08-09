@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
+import { useAIInsights, analyzePerformanceOverview } from "../components/AIInsights";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
@@ -165,6 +166,19 @@ export const PerformanceOverviewTab: React.FC = () => {
     const errorRate = T.actions > 0 ? (T.errors / T.actions) * 100 : 0;
     return { ...T, apdex, avgDur, errorRate };
   }, [scoredRows]);
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzePerformanceOverview(
+      scoredRows.map((r) => ({
+        application: r.application,
+        lcp: r.vitals?.lcpAvg ?? NaN,
+        inp: r.vitals?.inpAvg ?? NaN,
+        cls: r.vitals?.clsAvg ?? NaN,
+        apdex: r.apdex,
+      })),
+      totals.sessions,
+    ),
+  [scoredRows, totals.sessions]));
 
   const prevTotals = useMemo(() => {
     const T = { sessions: 0, actions: 0, errors: 0, satisfied: 0, tolerating: 0, frustrated: 0,
@@ -378,6 +392,7 @@ export const PerformanceOverviewTab: React.FC = () => {
 
   return (
     <div>
+      {aiPanel}
       {/* Unified 5-column KPI grid — Fleet Grade spans first column (all 3 rows), KPIs align in 5 equal columns */}
       <div style={{
         display: "grid",

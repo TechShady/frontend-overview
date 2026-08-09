@@ -134,19 +134,26 @@ export function TimelapseTable<T extends Record<string, any>>({
 
   const movementByKey = useMemo<Record<string, number | null>>(() => {
     const out: Record<string, number | null> = {};
+    if (bucketCount === 0 || ranksPerBucket.length === 0) {
+      for (const r of data) out[rowKey(r)] = null;
+      return out;
+    }
     for (const r of data) {
       const k = rowKey(r);
-      if (bucketCount > 0 && ranksPerBucket.length > 0) {
-        const start = ranksPerBucket[startIdx]?.[k];
-        const end = ranksPerBucket[playbackIdx]?.[k];
-        if (start != null && end != null) {
-          out[k] = start - end; // positive = moved up (better), negative = moved down
-        } else {
-          out[k] = null;
+      // Walk [0..playbackIdx] to find first and last non-null rank for this app.
+      // Skipping empty/null buckets ensures sparse data still shows movement.
+      let firstRank: number | null = null;
+      let lastRank: number | null = null;
+      for (let i = 0; i <= playbackIdx; i++) {
+        const rank = ranksPerBucket[i]?.[k];
+        if (rank != null) {
+          if (firstRank === null) firstRank = rank;
+          lastRank = rank;
         }
-      } else {
-        out[k] = null;
       }
+      out[k] = firstRank != null && lastRank != null && firstRank !== lastRank
+        ? firstRank - lastRank  // positive = moved up (better), negative = moved down
+        : firstRank != null && lastRank != null ? 0 : null;
     }
     return out;
   }, [data, rowKey, ranksPerBucket, bucketCount, playbackIdx]);
@@ -228,11 +235,11 @@ export function TimelapseTable<T extends Record<string, any>>({
         result = {
           ...result,
           cell: (info: any) => {
-            const row = info.row?.original as T | undefined;
-            const key = row ? rowKey(row) : "";
+            // Use the cell value directly as the row key (first-column accessor = rowKey extractor)
+            const key = String(info.value ?? "");
             const flick = flickerByKey[key];
             const cls = flick === "up" ? "tl-flicker-up" : flick === "down" ? "tl-flicker-down" : "";
-            const content = origCell ? origCell(info) : String(info.value ?? "");
+            const content = origCell ? origCell(info) : key;
             return <span className={cls} style={{ display: "inline-block" }}>{content}</span>;
           },
         };
@@ -290,8 +297,9 @@ export function TimelapseTable<T extends Record<string, any>>({
     return [...enhanced, movementCol];
   }, [columns, firstColumnField, rowKey, flickerByKey, movementByKey, sortOptions, setSortValue]);
 
-  // Attach _movement to each row so DataTable can display + sort it
-  const decorated = useMemo(() => sortedData.map((r) => ({ ...r, _movement: movementByKey[rowKey(r)] ?? 0 })), [sortedData, movementByKey, rowKey]);
+  // Attach _movement to each row so DataTable can display + sort it.
+  // Use null (not 0) so the cell can distinguish "no data" from "no change".
+  const decorated = useMemo(() => sortedData.map((r) => ({ ...r, _movement: movementByKey[rowKey(r)] ?? null })), [sortedData, movementByKey, rowKey]);
 
   return (
     <div>

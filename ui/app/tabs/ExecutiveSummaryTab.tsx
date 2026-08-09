@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback } from "react";
+import { useAIInsights, analyzeExecutiveSummary } from "../components/AIInsights";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
-import { TimelapseTable } from "../components/TimelapseTable";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
@@ -266,6 +266,13 @@ export const ExecutiveSummaryTab: React.FC = () => {
   [scoredRows]);
   const grade = gradeFromScore(fleetScore);
 
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzeExecutiveSummary(
+      scoredRows.map((r) => ({ application: r.summary.application, score: r.score, grade: gradeFromScore(r.score).letter })),
+      undefined,
+    ),
+  [scoredRows]));
+
   const scoreLB = (v: number, good: number, poor: number) => {
     if (!isFinite(v)) return NaN;
     if (v <= good) return 100;
@@ -322,44 +329,6 @@ export const ExecutiveSummaryTab: React.FC = () => {
     }
     return lines;
   }, [totals, prevTotals, fleetVitals, sel, timeframeDays, scoredRows]);
-
-  const snapshotRows = useMemo(() => [
-    { metric: "Total Sessions", value: fmt.num(totals.sessions), status: totals.sessions > 0 ? "Active" : "No traffic",
-      statusColor: totals.sessions > 0 ? GREEN : "rgba(128,128,128,0.7)" },
-    { metric: "Total Actions", value: fmt.num(totals.actions), status: totals.actions > 0 ? "Active" : "No activity",
-      statusColor: totals.actions > 0 ? GREEN : "rgba(128,128,128,0.7)" },
-    { metric: "Apdex", value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—", status: apdexLabel(totals.apdex),
-      statusColor: apdexClr(totals.apdex) },
-    { metric: "Avg Duration", value: fmt.ms(totals.avgDur),
-      status: !isFinite(totals.avgDur) ? "—" : totals.avgDur < 3000 ? "Fast" : totals.avgDur < 6000 ? "Acceptable" : "Slow",
-      statusColor: durClr(totals.avgDur) },
-    { metric: "Error Rate", value: fmt.pct(totals.errorRate),
-      status: totals.errorRate < 0.5 ? "Healthy" : totals.errorRate < 1 ? "Watch" : totals.errorRate < 5 ? "Degraded" : "Critical",
-      statusColor: errClr(totals.errorRate) },
-    { metric: "Frustrated %", value: totals.actions > 0 ? fmt.pct((totals.frustrated / totals.actions) * 100) : "—",
-      status: totals.frustrated / (totals.actions || 1) < 0.05 ? "Healthy" : totals.frustrated / (totals.actions || 1) < 0.15 ? "Watch" : "Critical",
-      statusColor: totals.frustrated / (totals.actions || 1) < 0.05 ? GREEN : totals.frustrated / (totals.actions || 1) < 0.15 ? YELLOW : RED },
-    { metric: "Fleet LCP", value: fmt.ms(fleetVitals.lcp), status: !isFinite(fleetVitals.lcp) ? "—" : fleetVitals.lcp <= 2500 ? "Good" : fleetVitals.lcp <= 4000 ? "Needs improvement" : "Poor",
-      statusColor: cwvLcpClr(fleetVitals.lcp) },
-    { metric: "Fleet INP", value: fmt.ms(fleetVitals.inp), status: !isFinite(fleetVitals.inp) ? "—" : fleetVitals.inp <= 200 ? "Good" : fleetVitals.inp <= 500 ? "Needs improvement" : "Poor",
-      statusColor: cwvInpClr(fleetVitals.inp) },
-    { metric: "Fleet CLS", value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—", status: !isFinite(fleetVitals.cls) ? "—" : fleetVitals.cls <= 0.1 ? "Good" : fleetVitals.cls <= 0.25 ? "Needs improvement" : "Poor",
-      statusColor: cwvClsClr(fleetVitals.cls) },
-    { metric: "Fleet TTFB", value: fmt.ms(fleetVitals.ttfb), status: !isFinite(fleetVitals.ttfb) ? "—" : fleetVitals.ttfb <= 800 ? "Good" : fleetVitals.ttfb <= 1800 ? "Needs improvement" : "Poor",
-      statusColor: cwvTtfbClr(fleetVitals.ttfb) },
-  ], [totals, fleetVitals]);
-
-  const snapshotColumns: any = useMemo(() => [
-    { id: "metric", header: "Metric", accessor: "metric", width: 220,
-      cell: ({ value }: any) => <span style={{ fontWeight: 600 }}>{String(value)}</span> },
-    { id: "value", header: "Value", accessor: "value", width: 160,
-      cell: ({ value }: any) => <span style={{ fontFamily: "monospace" }}>{String(value)}</span> },
-    { id: "status", header: "Status", accessor: "status", width: 220,
-      cell: ({ value, row }: any) => {
-        const c = row?.original?.statusColor ?? "rgba(128,128,128,0.7)";
-        return <span style={{ color: c, fontWeight: 700 }}>{String(value)}</span>;
-      } },
-  ], []);
 
   const copyReportText = useCallback(() => {
     const lines: string[] = [];
@@ -468,6 +437,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
 
   return (
     <div>
+      {aiPanel}
       {/* Header bar with export/copy buttons */}
       <div style={{ display: "flex", alignItems: "center", padding: "20px 20px 0", gap: 12 }}>
         <div style={{ flex: 1 }}>
@@ -534,16 +504,6 @@ export const ExecutiveSummaryTab: React.FC = () => {
         ))}
       </div>
 
-      {/* Key Metrics KPI cards */}
-      <SectionHeader title="Key Metrics" subtitle="Traffic, quality and reliability snapshot." />
-      <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-        <KpiCard label="Sessions" value={fmt.num(totals.sessions)} rawValue={totals.sessions} prevRawValue={prevTotals.sessions} color={BLUE} higherIsBetter sparkline={spk?.sessions} />
-        <KpiCard label="Actions" value={fmt.num(totals.actions)} rawValue={totals.actions} prevRawValue={prevTotals.actions} color="#08BDBA" higherIsBetter sparkline={spk?.actions} />
-        <KpiCard label="Apdex" value={isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} rawValue={isFinite(totals.apdex) ? totals.apdex : undefined} prevRawValue={isFinite(prevTotals.apdex) ? prevTotals.apdex : null} color={GREEN} higherIsBetter sparkline={spk?.apdex} />
-        <KpiCard label="Avg Duration" value={fmt.ms(totals.avgDur)} rawValue={isFinite(totals.avgDur) ? totals.avgDur : undefined} prevRawValue={isFinite(prevTotals.avgDur) ? prevTotals.avgDur : null} color={BLUE} sparkline={spk?.avgDur} />
-        <KpiCard label="Error Rate" value={fmt.pct(totals.errorRate)} rawValue={totals.errorRate} prevRawValue={isFinite(prevTotals.errorRate) ? prevTotals.errorRate : null} color={RED} sparkline={spk?.errorRate} />
-      </div>
-
       {/* Core Web Vitals KPI cards */}
       <SectionHeader title="Core Web Vitals" subtitle="Fleet-wide, session-weighted averages." />
       <div style={{ padding: "0 20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -553,19 +513,6 @@ export const ExecutiveSummaryTab: React.FC = () => {
         <KpiCard label="TTFB" value={fmt.ms(fleetVitals.ttfb)} rawValue={isFinite(fleetVitals.ttfb) ? fleetVitals.ttfb : undefined} color={cwvTtfbClr(fleetVitals.ttfb)} subtext="target ≤ 800ms" sparkline={spk?.ttfb} />
       </div>
 
-      {/* Performance Snapshot table */}
-      <SectionCard
-        title="Performance Snapshot"
-        subtitle="Every key signal at a glance with its current health status."
-      >
-        <TimelapseTable
-          data={snapshotRows}
-          columns={snapshotColumns}
-          rowKey={(r: any) => String(r.metric)}
-          firstColumnField="metric"
-          sortOptions={[{ value: "metric", label: "Metric", get: () => 0, higherIsBetter: true }]}
-        />
-      </SectionCard>
     </div>
   );
 };

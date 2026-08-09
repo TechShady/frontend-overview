@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
+import { useAIInsights, analyzeCostRanking } from "../components/AIInsights";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { resourceConsumptionQuery, webAppSummaryQuery, webAppBucketedMetricsQuery } from "../queries";
@@ -56,6 +57,13 @@ export const CostRankingTab: React.FC = () => {
 
   const totalCost = rows.reduce((a, r) => a + r.totalCost, 0);
   const mostExpensive = rows.slice().sort((a, b) => b.totalCost - a.totalCost)[0];
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzeCostRanking(
+      rows.map((r) => ({ application: r.application, totalCost: r.totalCost })),
+      totalCost,
+    ),
+  [rows, totalCost]));
   const costPerAction = rows.reduce((a, r) => a + r.actions, 0) > 0
     ? totalCost / rows.reduce((a, r) => a + r.actions, 0)
     : 0;
@@ -63,7 +71,7 @@ export const CostRankingTab: React.FC = () => {
   const maxCost = Math.max(1e-6, ...rows.map((r) => r.totalCost));
   const columns: any = useMemo(() => [
     { id: "rank", header: "Rank", accessor: "rank", width: 60,
-      cell: ({ row }: any) => <span style={{ fontWeight: 700, opacity: 0.7 }}>#{row.index + 1}</span> },
+      cell: ({ value }: any) => <span style={{ fontWeight: 700, opacity: 0.7 }}>#{Number(value)}</span> },
     { id: "application", header: "Web App", accessor: "application", width: 200,
       cell: ({ value }: any) => <span style={{ fontWeight: 600 }}>{String(value)}</span> },
     { id: "costBandwidth", header: "Bandwidth ($)", accessor: "costBandwidth", width: 130, sortType: "number" as any,
@@ -82,10 +90,14 @@ export const CostRankingTab: React.FC = () => {
         </div>
       ) },
     { id: "pct", header: "% of fleet", accessor: "pct", width: 100,
-      cell: ({ row }: any) => <span>{row?.original && totalCost > 0 ? fmt.pct((row.original.totalCost / totalCost) * 100) : "—"}</span> },
+      cell: ({ value }: any) => <span>{fmt.pct(Number(value))}</span> },
   ], [maxCost, totalCost]);
 
-  const ranked = rows.slice().sort((a, b) => b.totalCost - a.totalCost);
+  const ranked = rows.slice().sort((a, b) => b.totalCost - a.totalCost).map((r, i) => ({
+    ...r,
+    rank: i + 1,
+    pct: totalCost > 0 ? (r.totalCost / totalCost) * 100 : 0,
+  }));
 
   // Bucketed proxy metrics for Movement column (actions ≈ RUM cost, sessions ≈ traffic).
   const { bucketValuesBySort } = useBucketedRanks({
@@ -110,6 +122,7 @@ export const CostRankingTab: React.FC = () => {
 
   return (
     <div>
+      {aiPanel}
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
         <KpiCard label="Estimated fleet cost" value={`$${totalCost.toFixed(2)}`} rawValue={totalCost} color="#FF832B" sparkline={spk?.actions} />
         <KpiCard label="Most expensive web app" value={mostExpensive?.application ?? "—"} subtext={mostExpensive ? `$${mostExpensive.totalCost.toFixed(2)}` : ""} color="#C21930" rawValue={mostExpensive?.totalCost} sparkline={spk?.actions} />

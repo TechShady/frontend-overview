@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useCallback } from "react";
+import { useAIInsights, analyzePerfBudgets } from "../components/AIInsights";
 import { useSettings, DEFAULT_PERF_BUDGETS } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webVitalsPerAppQuery, resourceConsumptionQuery, errorsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
@@ -56,12 +57,19 @@ export const PerfBudgetsTab: React.FC = () => {
       const passed = applied.filter((c) => c.value <= c.limit).length;
       const total = applied.length;
       const score = total > 0 ? (passed / total) * 100 : NaN;
-      return { ...r, passed, total, score, checks };
+      return { ...r, passed, total, score, checks, passedLabel: `${passed}/${total}` };
     });
   }, [vitals.data, resources.data, errs.data, budgets]);
 
   const totalPassing = rows.filter((r) => r.total > 0 && r.passed === r.total).length;
   const totalFailing = rows.length - totalPassing;
+
+  const { panel: aiPanel } = useAIInsights(useCallback(() =>
+    analyzePerfBudgets(
+      rows.map((r) => ({ application: r.application, passed: r.passed, total: r.total, score: r.score })),
+      rows.length,
+    ),
+  [rows]));
 
   const columns: any = useMemo(() => [
     { id: "application", header: "Web App", accessor: "application", width: 200,
@@ -69,24 +77,19 @@ export const PerfBudgetsTab: React.FC = () => {
     { id: "score", header: "Compliance", accessor: "score", width: 90, sortType: "number" as any,
       cell: ({ value }: any) => <GradePill score={Number(value)} showScore /> },
     { id: "passed", header: "Passed", accessor: "passed", width: 90, sortType: "number" as any,
-      cell: ({ row }: any) => {
-        const o = row?.original;
-        if (!o) return <span style={{ opacity: 0.4 }}>—</span>;
-        return (
-          <span>
-            <span style={{ color: "#0D9C29", fontWeight: 700 }}>{o.passed}</span>
-            <span style={{ opacity: 0.6 }}> / {o.total}</span>
-          </span>
-        );
+      cell: ({ value }: any) => {
+        const v = Number(value);
+        if (!isFinite(v)) return <span style={{ opacity: 0.4 }}>—</span>;
+        return <span style={{ color: "#0D9C29", fontWeight: 700 }}>{v}</span>;
       } },
-    { id: "lcp",              header: "LCP",           accessor: "lcp",             width: 90,  cell: mkCheckCell("lcp") },
-    { id: "inp",              header: "INP",           accessor: "inp",             width: 90,  cell: mkCheckCell("inp") },
-    { id: "cls",              header: "CLS",           accessor: "cls",             width: 90,  cell: mkCheckCell("cls") },
-    { id: "ttfb",             header: "TTFB",          accessor: "ttfb",            width: 90,  cell: mkCheckCell("ttfb") },
-    { id: "bytesPerPage",     header: "Bytes / page",  accessor: "bytesPerPage",    width: 110, cell: mkCheckCell("bytesPerPage") },
-    { id: "requestsPerPage",  header: "Reqs / page",   accessor: "requestsPerPage", width: 100, cell: mkCheckCell("requestsPerPage") },
-    { id: "errorRate",        header: "Error rate",    accessor: "errorRate",       width: 100, cell: mkCheckCell("errorRate") },
-  ], []);
+    { id: "lcp",              header: "LCP",           accessor: "lcp",             width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.lcp_ms, "ms") },
+    { id: "inp",              header: "INP",           accessor: "inp",             width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.inp_ms, "ms") },
+    { id: "cls",              header: "CLS",           accessor: "cls",             width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.cls, "") },
+    { id: "ttfb",             header: "TTFB",          accessor: "ttfb",            width: 90,  sortType: "number" as any, cell: mkBudgetCell(budgets.ttfb_ms, "ms") },
+    { id: "bytesPerPage",     header: "Bytes / page",  accessor: "bytesPerPage",    width: 110, sortType: "number" as any, cell: mkBudgetCell(budgets.bytesPerPage_kb * 1024, "B") },
+    { id: "requestsPerPage",  header: "Reqs / page",   accessor: "requestsPerPage", width: 100, sortType: "number" as any, cell: mkBudgetCell(budgets.requestsPerPage, "") },
+    { id: "errorRate",        header: "Error rate",    accessor: "errorRate",       width: 100, sortType: "number" as any, cell: mkBudgetCell(budgets.errorRate_pct, "%") },
+  ], [budgets]);
 
   // Bucketed movement data.
   const { bucketValuesBySort: appBucket } = useBucketedRanks({
@@ -120,6 +123,7 @@ export const PerfBudgetsTab: React.FC = () => {
 
   return (
     <div>
+      {aiPanel}
       <div style={{ display: "flex", gap: 10, padding: 20, flexWrap: "wrap" }}>
         <KpiCard label="Web apps meeting all budgets" value={String(totalPassing)} rawValue={totalPassing} color="#0D9C29" higherIsBetter sparkline={spk?.apdex} />
         <KpiCard label="Web apps missing ≥ 1 budget" value={String(totalFailing)} rawValue={totalFailing} color="#C21930" sparkline={spk?.errorRate} />
@@ -143,7 +147,7 @@ export const PerfBudgetsTab: React.FC = () => {
                 step={b.step}
                 value={(budgets as any)[b.key]}
                 onChange={(e) => setBudgets({ ...budgets, [b.key]: Number(e.target.value) })}
-                style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 100 }}
+                style={{ padding: "4px 8px", background: "rgba(128,128,128,0.1)", border: "1px solid rgba(128,128,128,0.3)", borderRadius: 6, width: 100, color: "white" }}
               />
             </label>
           ))}
@@ -171,20 +175,18 @@ export const PerfBudgetsTab: React.FC = () => {
   );
 };
 
-function mkCheckCell(key: string) {
-  return ({ row }: any) => {
-    const o = row?.original;
-    if (!o) return <span style={{ opacity: 0.4 }}>—</span>;
-    const chk = (o.checks ?? []).find((c: any) => c.key === key);
-    if (!chk || !isFinite(chk.value)) return <span style={{ opacity: 0.4 }}>—</span>;
-    const pass = chk.value <= chk.limit;
+function mkBudgetCell(limit: number, unit: string) {
+  return ({ value }: any) => {
+    const v = Number(value);
+    if (!isFinite(v)) return <span style={{ opacity: 0.4 }}>—</span>;
+    const pass = v <= limit;
     const col = pass ? "#0D9C29" : "#C21930";
-    const label = chk.unit === "ms" ? `${chk.value.toFixed(0)}ms`
-      : chk.unit === "%" ? `${chk.value.toFixed(1)}%`
-      : chk.unit === "B" ? (chk.value >= 1e6 ? `${(chk.value / 1e6).toFixed(1)}MB` : `${(chk.value / 1024).toFixed(0)}KB`)
-      : chk.value < 1 ? chk.value.toFixed(2) : chk.value.toFixed(0);
+    const label = unit === "ms" ? `${v.toFixed(0)}ms`
+      : unit === "%" ? `${v.toFixed(1)}%`
+      : unit === "B" ? (v >= 1e6 ? `${(v / 1e6).toFixed(1)}MB` : `${(v / 1024).toFixed(0)}KB`)
+      : v < 1 ? v.toFixed(2) : v.toFixed(0);
     return (
-      <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, background: `${col}20`, color: col, fontWeight: 700, fontSize: 11 }} title={`limit: ${chk.limit}`}>
+      <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, background: `${col}20`, color: col, fontWeight: 700, fontSize: 11 }} title={`limit: ${limit}`}>
         {pass ? "✓" : "✗"} {label}
       </span>
     );
