@@ -141,29 +141,35 @@ export function TimelapseTable<T extends Record<string, any>>({
 
   const movementByKey = useMemo<Record<string, number | null>>(() => {
     const out: Record<string, number | null> = {};
-    if (bucketCount === 0 || ranksPerBucket.length === 0) {
-      for (const r of data) out[rowKey(r)] = null;
-      return out;
-    }
+    for (const r of data) out[rowKey(r)] = null;
+    if (bucketCount === 0 || !bucketValues) return out;
+
+    // Build a consistent universe: only apps with non-null data in BOTH bucket 0
+    // and the last (playback) bucket. Ranking both ends within the same N-app set
+    // guarantees sum(firstRanks) = sum(lastRanks), so net movement is always zero.
+    const firstVals: Array<{ key: string; v: number }> = [];
+    const lastVals:  Array<{ key: string; v: number }> = [];
     for (const r of data) {
       const k = rowKey(r);
-      // Walk [0..playbackIdx] to find first and last non-null rank for this app.
-      // Skipping empty/null buckets ensures sparse data still shows movement.
-      let firstRank: number | null = null;
-      let lastRank: number | null = null;
-      for (let i = 0; i <= playbackIdx; i++) {
-        const rank = ranksPerBucket[i]?.[k];
-        if (rank != null) {
-          if (firstRank === null) firstRank = rank;
-          lastRank = rank;
-        }
+      const fv = bucketValues[k]?.[0] ?? null;
+      const lv = bucketValues[k]?.[playbackIdx] ?? null;
+      if (fv != null && isFinite(fv) && lv != null && isFinite(lv)) {
+        firstVals.push({ key: k, v: fv });
+        lastVals.push({ key: k, v: lv });
       }
-      out[k] = firstRank != null && lastRank != null && firstRank !== lastRank
-        ? firstRank - lastRank  // positive = moved up (better), negative = moved down
-        : firstRank != null && lastRank != null ? 0 : null;
+    }
+
+    const firstRanks = rankOf(firstVals, higherIsBetter);
+    const lastRanks  = rankOf(lastVals,  higherIsBetter);
+
+    for (const r of data) {
+      const k = rowKey(r);
+      const fr = firstRanks[k] ?? null;
+      const lr = lastRanks[k] ?? null;
+      out[k] = fr != null && lr != null ? fr - lr : null;
     }
     return out;
-  }, [data, rowKey, ranksPerBucket, bucketCount, playbackIdx]);
+  }, [data, rowKey, bucketValues, bucketCount, playbackIdx, higherIsBetter]);
 
   // -----------------------------------------------------------------------
   // Flicker state — trigger when a row's rank changes between consecutive
