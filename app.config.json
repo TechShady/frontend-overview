@@ -3,7 +3,7 @@
   "environmentUrl": "https://guu84124.apps.dynatrace.com",
   "app": {
     "name": "Frontend Overview",
-    "version": "0.2.38",
+    "version": "0.2.39",
     "description": "Compare and contrast all web apps in the tenant.",
     "id": "my.frontend.overview.app",
     "icon": "./assets/icon.png",
