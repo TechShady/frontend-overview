@@ -409,6 +409,11 @@ export const ExecutiveSummaryTab: React.FC = () => {
   [scoredRows]);
   const grade = gradeFromScore(fleetScore);
 
+  const reportCardRows = useMemo(() => {
+    if (tl.enabled) return [...scoredRows].sort((a, b) => (isFinite(b.score) ? b.score : -1) - (isFinite(a.score) ? a.score : -1));
+    return allAppsScoredRows;
+  }, [tl.enabled, scoredRows, allAppsScoredRows]);
+
   const { panel: aiPanel } = useAIInsights(useCallback(() =>
     analyzeExecutiveSummary(
       scoredRows.map((r) => ({ application: r.summary.application, score: r.score, grade: gradeFromScore(r.score).letter })),
@@ -545,7 +550,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
     navigator.clipboard.writeText(lines.join("\n"))
       .then(() => console.log("Copied executive summary to clipboard"))
       .catch((e) => console.warn("Copy failed", e));
-  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, allAppsScoredRows]);
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, reportCardRows]);
 
   const exportReport = useCallback(() => {
     const scopeLabel = sel ?? `${scoredRows.length} web apps`;
@@ -660,7 +665,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
 
   <h2>Report Card (all apps)</h2>
   <div class="report-grid">
-    ${allAppsScoredRows.map(({ summary, score }) => {
+    ${reportCardRows.map(({ summary, score }) => {
       const g = gradeFromScore(score);
       return `<div class="report-card" style="border-color:${g.color}44; background:${g.color}0d;">
         <div style="font-size:36px; font-weight:900; color:${g.color}; line-height:1.1;">${g.letter}</div>
@@ -675,7 +680,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
     `;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); }
-  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, allAppsScoredRows]);
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, reportCardRows]);
 
   return (
     <div>
@@ -792,10 +797,10 @@ export const ExecutiveSummaryTab: React.FC = () => {
       {/* Report Card — always unfiltered, one card per app */}
       <SectionHeader
         title="Report Card"
-        subtitle="Per-app grade — always shows all apps. Click a card to focus the rest of this tab, click again to clear."
+        subtitle={tl.enabled ? "Per-app grade — animates with timelapse playback." : "Per-app grade — always shows all apps. Click a card to focus the rest of this tab, click again to clear."}
       />
       <div style={{ padding: "0 20px 20px", display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {allAppsScoredRows.map(({ summary, score }) => {
+        {reportCardRows.map(({ summary, score }) => {
           const g = gradeFromScore(score);
           const isSelected = sel === summary.application;
           const sfDen = (summary.satisfied ?? 0) + (summary.tolerating ?? 0) + (summary.frustrated ?? 0);
