@@ -493,15 +493,37 @@ export const ExecutiveSummaryTab: React.FC = () => {
     lines.push("=== Frontend Overview — Executive Summary ===");
     lines.push(`Scope: ${sel ?? `${scoredRows.length} web apps`}`);
     lines.push(`Period: last ${timeframeDays >= 1 ? `${timeframeDays} days` : `${Math.round(timeframeDays * 24)}h`}`);
+    lines.push(`Generated: ${new Date().toLocaleString()}`);
     lines.push("");
     lines.push(`Overall Grade: ${grade.letter} (${isFinite(fleetScore) ? fleetScore.toFixed(0) : "—"}/100)`);
     lines.push("");
     lines.push("--- Grade breakdown ---");
-    gradeMetrics.forEach((m) => lines.push(`  ${m.label} (${m.weight}%): ${m.value} — ${isFinite(m.score) ? m.score.toFixed(0) + "/100" : "—"}`));
+    gradeMetrics.forEach((m) => {
+      if (m.weight != null) {
+        lines.push(`  ${m.label} (${m.weight}%): ${m.value} — ${isFinite(m.score) ? m.score.toFixed(0) + "/100" : "—"}`);
+      } else {
+        lines.push(`    ↳ ${m.label}: ${m.value}`);
+      }
+    });
     lines.push("");
     lines.push("--- Narrative ---");
     narrative.forEach((l) => lines.push(l));
     lines.push("");
+    lines.push("--- Business Impact ---");
+    impactStats.forEach((s) => {
+      const arrow = s.delta == null || s.delta.neutral ? "=" : s.delta.positive ? "↑" : "↓";
+      const deltaStr = s.delta ? ` ${arrow} ${s.delta.label}` : "";
+      lines.push(`  ${s.label}: ${s.value}${deltaStr}  [${s.subtext}]`);
+    });
+    lines.push("");
+    if (whatChanged.length > 0) {
+      lines.push("--- What Changed ---");
+      whatChanged.forEach((w) => {
+        const driverStr = w.driver ? `  — ${w.driver}` : "";
+        lines.push(`  ${w.application}: ${w.prevGrade.letter} → ${w.curr.letter} (${w.delta > 0 ? "+" : ""}${w.delta.toFixed(0)} pts)${driverStr}`);
+      });
+      lines.push("");
+    }
     lines.push("--- Key metrics ---");
     lines.push(`  Sessions:   ${fmt.num(totals.sessions)}`);
     lines.push(`  Actions:    ${fmt.num(totals.actions)}`);
@@ -514,10 +536,16 @@ export const ExecutiveSummaryTab: React.FC = () => {
     lines.push(`  INP:  ${fmt.ms(fleetVitals.inp)}`);
     lines.push(`  CLS:  ${isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(3) : "—"}`);
     lines.push(`  TTFB: ${fmt.ms(fleetVitals.ttfb)}`);
+    lines.push("");
+    lines.push("--- Report Card (all apps) ---");
+    allAppsScoredRows.forEach(({ summary, score }) => {
+      const g = gradeFromScore(score);
+      lines.push(`  ${summary.application}: ${g.letter} (${isFinite(score) ? score.toFixed(0) + "/100" : "—"})`);
+    });
     navigator.clipboard.writeText(lines.join("\n"))
       .then(() => console.log("Copied executive summary to clipboard"))
       .catch((e) => console.warn("Copy failed", e));
-  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals]);
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, allAppsScoredRows]);
 
   const exportReport = useCallback(() => {
     const scopeLabel = sel ?? `${scoredRows.length} web apps`;
@@ -542,6 +570,16 @@ export const ExecutiveSummaryTab: React.FC = () => {
   .narrative { padding: 14px; background: #f6f7fb; border-left: 4px solid #4589FF; margin-bottom: 24px; }
   .narrative p { margin: 6px 0; font-size: 14px; }
   h2 { margin-top: 28px; border-bottom: 2px solid #e0e0e0; padding-bottom: 6px; }
+  .kpi-grid { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0 24px; }
+  .kpi-card { padding: 14px 18px; border-radius: 10px; border: 1px solid #e0e0e0; min-width: 130px; flex: 1 1 130px; }
+  .kpi-label { font-size: 11px; color: #888; margin-bottom: 4px; }
+  .kpi-value { font-size: 22px; font-weight: 800; }
+  .kpi-delta { font-size: 11px; font-weight: 600; margin-top: 3px; }
+  .kpi-sub { font-size: 10px; color: #aaa; margin-top: 2px; }
+  .changed-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-radius: 8px; background: #f9f9fb; border: 1px solid #eee; margin-bottom: 4px; }
+  .report-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 24px; }
+  .report-card { padding: 12px 16px; border-radius: 12px; min-width: 110px; text-align: center; border: 2px solid; }
+  @media print { body { padding: 16px; } }
 </style></head>
 <body>
   <h1>Executive Summary</h1>
@@ -552,20 +590,54 @@ export const ExecutiveSummaryTab: React.FC = () => {
     <div>
       <div style="font-size: 20px; font-weight: 700;">Fleet Grade</div>
       <div class="score">Weighted score: <b>${isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"} / 100</b></div>
+      <div style="font-size: 12px; color: #888; margin-top: 6px;">Blend of Apdex (25%), Error rate (22%), CWV — LCP (20%), INP (16%), CLS (10%), TTFB (7%)</div>
     </div>
   </div>
 
   <h2>Grade Breakdown</h2>
-  ${gradeMetrics.map((m) => `
+  ${gradeMetrics.map((m) => m.weight != null ? `
     <div class="metric-row">
       <div class="metric-label">${m.label} <span style="color:#888; font-weight:normal;">(${m.weight}%)</span></div>
       <div class="bar-bg"><div style="height:100%; width:${Math.max(0, Math.min(100, m.score || 0))}%; background:${m.color};"></div></div>
       <div class="metric-value" style="color:${m.color};">${m.value}</div>
       <div style="width:60px; text-align:right; font-family:monospace; color:#888;">${isFinite(m.score) ? m.score.toFixed(0) + "/100" : "—"}</div>
+    </div>` : `
+    <div style="padding: 4px 0 4px 20px; font-size: 12px; color: #555; border-bottom: 1px solid #f0f0f0;">
+      ↳ ${m.label}: <b style="color:${m.color};">${m.value}</b>
     </div>`).join("")}
 
-  <h2>AI Executive Narrative</h2>
+  <h2>Narrative</h2>
   <div class="narrative">${narrative.map((l) => `<p>${l}</p>`).join("")}</div>
+
+  <h2>Business Impact</h2>
+  <div class="kpi-grid">
+    ${impactStats.map((s) => {
+      const dColor = s.delta == null || s.delta.neutral ? "#888" : s.delta.positive ? "#0D9C29" : "#C21930";
+      const arrow = s.delta == null || s.delta.neutral ? "=" : s.delta.positive ? "↑" : "↓";
+      return `<div class="kpi-card">
+        <div class="kpi-label">${s.label}</div>
+        <div class="kpi-value">${s.value}</div>
+        ${s.delta ? `<div class="kpi-delta" style="color:${dColor};">${arrow} ${s.delta.label}</div>` : ""}
+        <div class="kpi-sub">${s.subtext}</div>
+      </div>`;
+    }).join("")}
+  </div>
+
+  ${whatChanged.length > 0 ? `
+  <h2>What Changed</h2>
+  <div style="margin-bottom: 24px;">
+    ${whatChanged.map((w) => `
+      <div class="changed-row">
+        <div style="min-width: 180px; font-size: 13px; font-weight: 700;">${w.application}</div>
+        <div style="font-size: 20px; font-weight: 900;">
+          <span style="color:${w.prevGrade.color}; opacity:0.6;">${w.prevGrade.letter}</span>
+          <span style="font-size:13px; opacity:0.4;"> → </span>
+          <span style="color:${w.curr.color};">${w.curr.letter}</span>
+        </div>
+        <div style="font-family:monospace; font-size:13px; font-weight:700; color:${w.delta > 0 ? "#0D9C29" : "#C21930"};">${w.delta > 0 ? "+" : ""}${w.delta.toFixed(0)} pts</div>
+        ${w.driver ? `<div style="font-size:12px; color:#888;">${w.driver}</div>` : ""}
+      </div>`).join("")}
+  </div>` : ""}
 
   <h2>Key Metrics</h2>
   <table>
@@ -573,7 +645,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
     <tr><td>Sessions</td><td>${fmt.num(totals.sessions)}</td></tr>
     <tr><td>Actions</td><td>${fmt.num(totals.actions)}</td></tr>
     <tr><td>Errors</td><td>${fmt.num(totals.errors)} (${fmt.pct(totals.errorRate)})</td></tr>
-    <tr><td>Apdex</td><td>${isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"}</td></tr>
+    <tr><td>Apdex</td><td>${isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—"} — ${apdexLabel(totals.apdex)}</td></tr>
     <tr><td>Avg duration</td><td>${fmt.ms(totals.avgDur)}</td></tr>
   </table>
 
@@ -586,12 +658,24 @@ export const ExecutiveSummaryTab: React.FC = () => {
     <tr><td>TTFB</td><td>${fmt.ms(fleetVitals.ttfb)}</td><td style="color:${cwvTtfbClr(fleetVitals.ttfb)};">${!isFinite(fleetVitals.ttfb) ? "—" : fleetVitals.ttfb <= 800 ? "Good" : fleetVitals.ttfb <= 1800 ? "Needs improvement" : "Poor"}</td></tr>
   </table>
 
+  <h2>Report Card (all apps)</h2>
+  <div class="report-grid">
+    ${allAppsScoredRows.map(({ summary, score }) => {
+      const g = gradeFromScore(score);
+      return `<div class="report-card" style="border-color:${g.color}44; background:${g.color}0d;">
+        <div style="font-size:36px; font-weight:900; color:${g.color}; line-height:1.1;">${g.letter}</div>
+        <div style="font-size:11px; font-weight:600; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:110px;">${summary.application}</div>
+        <div style="font-size:10px; color:#888; font-family:monospace;">${isFinite(score) ? score.toFixed(0) + "/100" : "—"}</div>
+      </div>`;
+    }).join("")}
+  </div>
+
   <script>window.onload = () => setTimeout(() => window.print(), 400);</script>
 </body></html>
     `;
     const w = window.open("", "_blank");
     if (w) { w.document.write(html); w.document.close(); }
-  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals]);
+  }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, allAppsScoredRows]);
 
   return (
     <div>
