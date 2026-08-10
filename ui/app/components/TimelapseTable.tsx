@@ -314,7 +314,7 @@ export function TimelapseTable<T extends Record<string, any>>({
 
   return (
     <div>
-      {/* Movement / bucket status strip — sort is driven by column header clicks */}
+      {/* Movement / bucket status strip */}
       {(tl.enabled || bucketCount > 0) && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, fontSize: 11, opacity: 0.7 }}>
           {tl.enabled && bucketCount > 0 && (
@@ -326,10 +326,35 @@ export function TimelapseTable<T extends Record<string, any>>({
           {!bucketValues && (
             <span style={{ opacity: 0.5 }}>Movement: no bucket data</span>
           )}
-          {bucketValues && !tl.enabled && bucketCount > 0 && (
+          {bucketValues && bucketCount > 0 && sortOptions.length > 1 && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ opacity: 0.65 }}>Movement by</span>
+              <select
+                value={sortValue}
+                onChange={(e) => setSortValue(e.target.value)}
+                style={{
+                  background: "rgba(128,128,128,0.12)",
+                  border: "1px solid rgba(128,128,128,0.3)",
+                  borderRadius: 4,
+                  color: "inherit",
+                  fontSize: 11,
+                  padding: "1px 4px",
+                  cursor: "pointer",
+                  opacity: 0.85,
+                }}
+              >
+                {sortOptions.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {!tl.enabled && (
+                <span style={{ opacity: 0.65 }}>: first → last of {bucketCount} buckets</span>
+              )}
+            </span>
+          )}
+          {bucketValues && bucketCount > 0 && sortOptions.length <= 1 && !tl.enabled && (
             <span style={{ opacity: 0.65 }}>Movement: first → last of {bucketCount} buckets by {sortOpt?.label ?? sortValue}</span>
           )}
-          <span style={{ marginLeft: "auto", opacity: 0.45 }}>Click a column header to sort</span>
         </div>
       )}
 
