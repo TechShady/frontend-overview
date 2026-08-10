@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "@dynatrace/strato-components-preview/tables";
 import { useTimelapse } from "../TimelapseContext";
+import { useSettings } from "../SettingsContext";
+import { bucketSizeForDays } from "../queries";
 import { EmptyState } from "./layout";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,10 @@ export function TimelapseTable<T extends Record<string, any>>({
 }: TimelapseTableProps<T>) {
   ensureStyles();
   const tl = useTimelapse();
+  const { timeframeDays } = useSettings();
+
+  // Interval label for the movement strip: use TL bucket when enabled, else derive from timeframe.
+  const intervalLabel = tl.enabled ? tl.bucket : bucketSizeForDays(timeframeDays).label;
 
   const [sortValue, setSortValue] = useState<string>(defaultSort ?? sortOptions[0]?.value ?? "");
   useEffect(() => {
@@ -333,27 +339,26 @@ export function TimelapseTable<T extends Record<string, any>>({
                 value={sortValue}
                 onChange={(e) => setSortValue(e.target.value)}
                 style={{
-                  background: "rgba(128,128,128,0.12)",
+                  fontSize: 11,
+                  background: "#1a1e2e",
+                  color: "#e0e0e0",
                   border: "1px solid rgba(128,128,128,0.3)",
                   borderRadius: 4,
-                  color: "inherit",
-                  fontSize: 11,
-                  padding: "1px 4px",
+                  padding: "3px 6px",
                   cursor: "pointer",
-                  opacity: 0.85,
                 }}
               >
                 {sortOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                  <option key={o.value} value={o.value} style={{ background: "#1a1e2e", color: "#e0e0e0" }}>{o.label}</option>
                 ))}
               </select>
               {!tl.enabled && (
-                <span style={{ opacity: 0.65 }}>: first → last of {bucketCount} buckets</span>
+                <span style={{ opacity: 0.65 }}>: first → last · {bucketCount} × {intervalLabel}</span>
               )}
             </span>
           )}
           {bucketValues && bucketCount > 0 && sortOptions.length <= 1 && !tl.enabled && (
-            <span style={{ opacity: 0.65 }}>Movement: first → last of {bucketCount} buckets by {sortOpt?.label ?? sortValue}</span>
+            <span style={{ opacity: 0.65 }}>Movement: first → last · {bucketCount} × {intervalLabel} by {sortOpt?.label ?? sortValue}</span>
           )}
         </div>
       )}
