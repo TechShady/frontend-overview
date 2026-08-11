@@ -58,7 +58,7 @@ export const DEFAULT_PERF_BUDGETS = {
   thirdPartyPct: 40,
 };
 
-export type WebAppFilter = { selected: string | null };
+export type WebAppFilter = { selected: string[] | null };
 
 type SettingsCtx = {
   timeframeDays: number;
@@ -128,7 +128,15 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof p.timeframeDays === "number") setTimeframeDays(p.timeframeDays);
       if (typeof p.refreshIntervalMs === "number") setRefreshIntervalMs(p.refreshIntervalMs);
       if (p.budgets) setBudgets({ ...DEFAULT_PERF_BUDGETS, ...p.budgets });
-      if (p.webAppFilter) setWebAppFilter(p.webAppFilter);
+      if (p.webAppFilter) {
+        const waf = p.webAppFilter;
+        // Migrate old persisted format (single string → array)
+        if (typeof waf.selected === "string") {
+          setWebAppFilter({ selected: [waf.selected] });
+        } else {
+          setWebAppFilter(waf);
+        }
+      }
     } catch { /* noop */ }
   }, [prefsState.isLoading, prefsState.data?.value]);
 
@@ -207,8 +215,10 @@ export function periodClause(days: number, prev = false): string {
   return `from: now()-${n}${unit}`;
 }
 
-export function webAppFilterClause(selected: string | null, field = "application"): string {
-  if (!selected) return "";
-  const safe = selected.replace(/"/g, '\\"');
-  return ` | filter ${field} == "${safe}"`;
+export function webAppFilterClause(selected: string[] | null, field = "application"): string {
+  if (!selected || selected.length === 0) return "";
+  const esc = (s: string) => s.replace(/"/g, '\\"');
+  if (selected.length === 1) return ` | filter ${field} == "${esc(selected[0])}"`;
+  const conditions = selected.map(s => `${field} == "${esc(s)}"`).join(" or ");
+  return ` | filter (${conditions})`;
 }

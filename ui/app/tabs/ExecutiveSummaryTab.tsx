@@ -456,7 +456,9 @@ export const ExecutiveSummaryTab: React.FC = () => {
 
   const narrative = useMemo(() => {
     const lines: string[] = [];
-    const scope = sel ? `web app "${sel}"` : `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`;
+    const scope = sel
+      ? (sel.length === 1 ? `web app "${sel[0]}"` : `${sel.length} web apps`)
+      : `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`;
     const period = timeframeDays >= 1 ? `${timeframeDays} day${timeframeDays === 1 ? "" : "s"}` : `${Math.round(timeframeDays * 24)} hours`;
     lines.push(`Over the last ${period}, ${scope} handled ${fmt.num(totals.sessions)} session${totals.sessions === 1 ? "" : "s"} and ${fmt.num(totals.actions)} user actions.`);
     if (isFinite(totals.apdex)) {
@@ -496,7 +498,10 @@ export const ExecutiveSummaryTab: React.FC = () => {
   const copyReportText = useCallback(() => {
     const lines: string[] = [];
     lines.push("=== Frontend Overview — Executive Summary ===");
-    lines.push(`Scope: ${sel ?? `${scoredRows.length} web apps`}`);
+    const selLabel = sel
+      ? (sel.length === 1 ? sel[0] : `${sel.length} web apps`)
+      : `${scoredRows.length} web apps`;
+    lines.push(`Scope: ${selLabel}`);
     lines.push(`Period: last ${timeframeDays >= 1 ? `${timeframeDays} days` : `${Math.round(timeframeDays * 24)}h`}`);
     lines.push(`Generated: ${new Date().toLocaleString()}`);
     lines.push("");
@@ -553,7 +558,9 @@ export const ExecutiveSummaryTab: React.FC = () => {
   }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, reportCardRows]);
 
   const exportReport = useCallback(() => {
-    const scopeLabel = sel ?? `${scoredRows.length} web apps`;
+    const scopeLabel = sel
+      ? (sel.length === 1 ? sel[0] : `${sel.length} web apps`)
+      : `${scoredRows.length} web apps`;
     const periodLabel = timeframeDays >= 1 ? `${timeframeDays} days` : `${Math.round(timeframeDays * 24)}h`;
     const html = `
 <!doctype html>
@@ -690,7 +697,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2 }}>Executive Summary</div>
           <div style={{ fontSize: 12, opacity: 0.65, marginTop: 2 }}>
-            Scope: <b>{sel ?? `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`}</b> ·
+            Scope: <b>{sel ? (sel.length === 1 ? sel[0] : `${sel.length} web apps`) : `${scoredRows.length} web app${scoredRows.length === 1 ? "" : "s"}`}</b> ·
             Period: last {timeframeDays >= 1 ? `${timeframeDays} day${timeframeDays === 1 ? "" : "s"}` : `${Math.round(timeframeDays * 24)}h`}
           </div>
         </div>
@@ -802,7 +809,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
       <div style={{ padding: "0 20px 20px", display: "flex", flexWrap: "wrap", gap: 10 }}>
         {reportCardRows.map(({ summary, score }) => {
           const g = gradeFromScore(score);
-          const isSelected = sel === summary.application;
+          const isSelected = sel?.includes(summary.application) ?? false;
           const sfDen = (summary.satisfied ?? 0) + (summary.tolerating ?? 0) + (summary.frustrated ?? 0);
           const sPct = sfDen > 0 ? ((summary.satisfied  ?? 0) / sfDen) * 100 : 0;
           const tPct = sfDen > 0 ? ((summary.tolerating ?? 0) / sfDen) * 100 : 0;
@@ -810,7 +817,14 @@ export const ExecutiveSummaryTab: React.FC = () => {
           return (
             <div
               key={summary.application}
-              onClick={() => setWebAppFilter({ selected: isSelected ? null : summary.application })}
+              onClick={() => {
+                if (isSelected) {
+                  const next = (sel ?? []).filter(s => s !== summary.application);
+                  setWebAppFilter({ selected: next.length > 0 ? next : null });
+                } else {
+                  setWebAppFilter({ selected: [...(sel ?? []), summary.application] });
+                }
+              }}
               style={{
                 cursor: "pointer",
                 padding: "12px 16px",

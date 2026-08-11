@@ -87,6 +87,27 @@ const AppHeader: React.FC<{
   } = useSettings();
   const tl = useTimelapse();
 
+  const [appFilterPhrase, setAppFilterPhrase] = useState("");
+
+  const filteredWebApps = useMemo(() => {
+    if (!appFilterPhrase.trim()) return webApps;
+    const lower = appFilterPhrase.toLowerCase();
+    return webApps.filter(a => a.name.toLowerCase().includes(lower));
+  }, [webApps, appFilterPhrase]);
+
+  const prevPhraseRef = useRef("");
+  useEffect(() => {
+    const prev = prevPhraseRef.current;
+    prevPhraseRef.current = appFilterPhrase;
+    if (!appFilterPhrase.trim()) {
+      if (prev.trim()) setWebAppFilter({ selected: null });
+      return;
+    }
+    const lower = appFilterPhrase.toLowerCase();
+    const matched = webApps.filter(a => a.name.toLowerCase().includes(lower)).map(a => a.name);
+    setWebAppFilter({ selected: matched.length > 0 ? matched : null });
+  }, [appFilterPhrase, webApps]);
+
   // Hotness diagnosis panel — draggable, portaled to body.
   const [tlDiagPanel, setTlDiagPanel] = useState<{ pos: { x: number; y: number } } | null>(null);
   const tlDiagDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -141,20 +162,38 @@ const AppHeader: React.FC<{
         </div>
 
         <Strong style={{ fontSize: 12 }}>Web App</Strong>
+        <input
+          type="text"
+          value={appFilterPhrase}
+          onChange={e => setAppFilterPhrase(e.target.value)}
+          placeholder="filter apps…"
+          style={{
+            width: 130,
+            padding: "4px 8px",
+            borderRadius: 4,
+            border: "1px solid rgba(128,128,128,0.4)",
+            background: "rgba(255,255,255,0.06)",
+            color: "inherit",
+            fontSize: 12,
+            outline: "none",
+          }}
+        />
         <Select
           name="webAppFilter"
-          value={webAppFilter.selected ?? "__ALL__"}
-          onChange={(v: any) => {
-            const first = Array.isArray(v) ? v[0] : v;
-            setWebAppFilter({ selected: !first || first === "__ALL__" ? null : String(first) });
+          multiple={true}
+          value={webAppFilter.selected ?? []}
+          onChange={(v: string[]) => {
+            setWebAppFilter({ selected: v.length === 0 ? null : v });
           }}
         >
-          <Select.Trigger width="300px" />
+          <Select.Trigger width="280px" />
           <Select.Content>
-            <Select.Option value="__ALL__">All web apps (compare)</Select.Option>
-            {webApps.map((a) => (
-              <Select.Option key={a.name} value={a.name}>{a.name} ({a.sessions.toLocaleString()})</Select.Option>
-            ))}
+            {filteredWebApps.length === 0
+              ? <Select.EmptyState>No apps match filter</Select.EmptyState>
+              : filteredWebApps.map((a) => (
+                  <Select.Option key={a.name} value={a.name}>{a.name} ({a.sessions.toLocaleString()})</Select.Option>
+                ))
+            }
           </Select.Content>
         </Select>
 
@@ -780,7 +819,10 @@ const AppInner: React.FC = () => {
               const fromIso = new Date(anchor - analyzeDays * 86400000).toISOString();
               const toIso = new Date(anchor).toISOString();
               const sel = webAppFilter.selected;
-              const appFilt = sel ? ` and frontend.name == "${sel.replace(/"/g, '\\"')}"` : "";
+              const esc = (s: string) => s.replace(/"/g, '\\"');
+              const appFilt = !sel || sel.length === 0 ? ""
+                : sel.length === 1 ? ` and frontend.name == "${esc(sel[0])}"`
+                : ` and (${sel.map(s => `frontend.name == "${esc(s)}"`).join(" or ")})`;
               const lbl = forecastModal.label.toLowerCase();
               const isAct = `characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"`;
 

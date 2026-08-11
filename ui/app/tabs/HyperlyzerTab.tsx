@@ -260,7 +260,7 @@ const FilterChip: React.FC<{ filter: AppliedFilter; onRemove: () => void }> = ({
 // ─── Main tab ──────────────────────────────────────────────────────────────
 export const HyperlyzerTab: React.FC = () => {
   const { timeframeDays, webAppFilter } = useSettings();
-  const frontend = webAppFilter.selected;
+  const frontend = webAppFilter.selected?.[0] ?? null;
   const tl = useTimelapse();
 
   const [filterText, setFilterText] = useState("");

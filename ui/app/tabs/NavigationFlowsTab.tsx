@@ -25,11 +25,12 @@ import { Text, Strong } from "@dynatrace/strato-components/typography";
 import { getEnvironmentUrl } from "@dynatrace-sdk/app-environment";
 const ENV_URL = getEnvironmentUrl();
 
-function sessionsFilterUrl(countryIso: string, appName: string | null, days: number): string {
+function sessionsFilterUrl(countryIso: string, appName: string[] | null, days: number): string {
   const countryName = ISO_NAMES[countryIso.toUpperCase()] ?? countryIso;
   const tf = encodeURIComponent(`now-${days}d;now`);
-  const filter = appName
-    ? `Frontends = ${appName} Location = "${countryName}"`
+  const singleApp = appName?.length === 1 ? appName[0] : null;
+  const filter = singleApp
+    ? `Frontends = ${singleApp} Location = "${countryName}"`
     : `Location = "${countryName}"`;
   return `${ENV_URL}/ui/apps/dynatrace.users.sessions/sessions/sessions?tf=${tf}&perspective=general#filtering=${encodeURIComponent(filter)}`;
 }

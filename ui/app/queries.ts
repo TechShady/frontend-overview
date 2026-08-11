@@ -1,5 +1,14 @@
 import { periodClause, webAppFilterClause } from "./SettingsContext";
 
+// Inline ` and frontend.name == ...` fragment for multi-select filter.
+function appFilt(selected: string[] | null, field = "frontend.name"): string {
+  if (!selected || selected.length === 0) return "";
+  const esc = (s: string) => s.replace(/"/g, '\\"');
+  if (selected.length === 1) return ` and ${field} == "${esc(selected[0])}"`;
+  const conditions = selected.map(s => `${field} == "${esc(s)}"`).join(" or ");
+  return ` and (${conditions})`;
+}
+
 // Every query aggregates by `application` — actual DQL field is `frontend.name`
 // (or `dt.entity.application` for metrics). Consumers use `application` uniformly.
 //
@@ -31,8 +40,8 @@ export function webAppInventoryQuery(days: number): string {
 // Note: `dt.rum.user.id` is mostly null in this tenant → use session count as a proxy.
 // `avgDuration` returned in ms (converted from nanoseconds). Apdex uses 3s / 12s
 // thresholds on user_action/user_interaction events (industry standard).
-export function webAppSummaryQuery(days: number, selected: string | null, prev = false): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function webAppSummaryQuery(days: number, selected: string[] | null, prev = false): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days, prev)}
     | filter isNotNull(frontend.name)${filt}
@@ -62,8 +71,8 @@ export function webAppSummaryQuery(days: number, selected: string | null, prev =
 
 // Core Web Vitals per web app — from user.events (metric namespace unavailable in guu84124).
 // Values converted from nanoseconds → milliseconds. CLS remains unitless.
-export function webVitalsPerAppQuery(days: number, selected: string | null, prev = false): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function webVitalsPerAppQuery(days: number, selected: string[] | null, prev = false): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days, prev)}
     | filter isNotNull(frontend.name)${filt}
@@ -100,8 +109,8 @@ export function webVitalsPerAppQuery(days: number, selected: string | null, prev
 }
 
 // Device segments — sessions/apdex/errors grouped by app × device type.
-export function deviceSegmentsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function deviceSegmentsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(device.type)${filt}
@@ -127,8 +136,8 @@ export function deviceSegmentsQuery(days: number, selected: string | null): stri
 
 // Fallback: computed from user events when metrics are absent. Same as inventory,
 // kept for backward compatibility with any component still importing it.
-export function webVitalsFromEventsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function webVitalsFromEventsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -142,8 +151,8 @@ export function webVitalsFromEventsQuery(days: number, selected: string | null):
 }
 
 // Failure / error rate per web app.
-export function errorsPerAppQuery(days: number, selected: string | null, prev = false): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function errorsPerAppQuery(days: number, selected: string[] | null, prev = false): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days, prev)}
     | filter isNotNull(frontend.name)${filt}
@@ -163,8 +172,8 @@ export function errorsPerAppQuery(days: number, selected: string | null, prev = 
 
 // Top pages per web app. Uses page_summary / view_summary / user_action classifiers
 // as the "page view" surrogate since `event.type == "ACTION"` doesn't exist.
-export function topPagesQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function topPagesQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(view.name)${filt}
@@ -183,8 +192,8 @@ export function topPagesQuery(days: number, selected: string | null): string {
 // Page transitions — collect view names per session as an array; transitions are
 // computed client-side in NavigationFlowsTab because DQL `shift()` isn't available.
 // The tab reads `path` (string[]) and derives from/to pairs.
-export function pageTransitionsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function pageTransitionsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(view.name) and isNotNull(dt.rum.session.id)${filt}
@@ -205,8 +214,8 @@ export function pageTransitionsQuery(days: number, selected: string | null): str
 //   avgDomComplete = avg page-summary event duration in ms (proxy for full-load time)
 // Byte-level data (totalBytes / avgBytesPerView) is unavailable → returned as 0.
 // The cost tab will therefore show request+RUM cost only until a byte metric exists.
-export function resourceConsumptionQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function resourceConsumptionQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -227,8 +236,8 @@ export function resourceConsumptionQuery(days: number, selected: string | null):
 
 // Third-party impact per web app. `view.third_party.*` doesn't exist in this
 // tenant → return zero counts so the tab renders "no data" cleanly.
-export function thirdPartyImpactQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function thirdPartyImpactQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -246,8 +255,8 @@ export function thirdPartyImpactQuery(days: number, selected: string | null): st
 }
 
 // Traffic timeseries — sessions & actions over time per web app.
-export function trafficTimeseriesQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function trafficTimeseriesQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -262,8 +271,8 @@ export function trafficTimeseriesQuery(days: number, selected: string | null): s
 }
 
 // Sessions over time — used by ExecutiveSummary sparkline. Same signature.
-export function sessionsTimeseriesQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sessionsTimeseriesQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -276,8 +285,8 @@ export function sessionsTimeseriesQuery(days: number, selected: string | null): 
 
 // Geo per web app. Uses `geo.country.iso_code` (2-letter code) since
 // `geolocation.country` and `geo.country.name` don't exist in this tenant.
-export function geoPerAppQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function geoPerAppQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
@@ -295,8 +304,8 @@ export function geoPerAppQuery(days: number, selected: string | null): string {
 
 // Device / browser / OS breakdown per web app.
 // Uses `browser.name` since `user_agent.family` / `browser.family` don't exist.
-export function deviceBreakdownQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function deviceBreakdownQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(browser.name)${filt}
@@ -319,8 +328,8 @@ export function deviceBreakdownQuery(days: number, selected: string | null): str
 // Top JS error types per web app. `error.message` / `error.name` don't exist in
 // this tenant → group by `error.type` (e.g. "csp", "request", "js_error"), falling
 // back to classifier for events without a type.
-export function jsErrorsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function jsErrorsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and characteristics.has_error == true${filt}
@@ -334,8 +343,11 @@ export function jsErrorsQuery(days: number, selected: string | null): string {
 }
 
 // Davis problems tied to web-app RUM services.
-export function problemsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` | filter contains(affected_entity_names, "${selected.replace(/"/g, '\\"')}")` : "";
+export function problemsQuery(days: number, selected: string[] | null): string {
+  const esc = (s: string) => s.replace(/"/g, '\\"');
+  const filt = !selected || selected.length === 0 ? ""
+    : selected.length === 1 ? ` | filter contains(affected_entity_names, "${esc(selected[0])}")`
+    : ` | filter (${selected.map(s => `contains(affected_entity_names, "${esc(s)}")`).join(" or ")})`;
   return `
     fetch dt.davis.problems, ${periodClause(days)}
     | filter event.category == "AVAILABILITY" or event.category == "ERROR" or event.category == "SLOWDOWN" or event.category == "RESOURCE"
@@ -373,8 +385,8 @@ export function bucketSizeForDays(days: number): { label: string; ms: number; co
   };
 }
 
-export function webAppBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function webAppBucketedMetricsQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -407,8 +419,8 @@ export function webAppBucketedMetricsQuery(days: number, selected: string | null
 }
 
 // Same shape but keyed by page/view — for NavigationFlows Top Pages table.
-export function pagesBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function pagesBucketedMetricsQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -428,8 +440,8 @@ export function pagesBucketedMetricsQuery(days: number, selected: string | null,
 }
 
 // Bucketed geo — per country per bucket.
-export function geoBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function geoBucketedMetricsQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -447,8 +459,8 @@ export function geoBucketedMetricsQuery(days: number, selected: string | null, b
 }
 
 // Bucketed device breakdown.
-export function deviceBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function deviceBucketedMetricsQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -466,8 +478,8 @@ export function deviceBucketedMetricsQuery(days: number, selected: string | null
 }
 
 // Bucketed error types — per (application, errorType).
-export function errorsBucketedMetricsQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function errorsBucketedMetricsQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -488,8 +500,8 @@ export function errorsBucketedMetricsQuery(days: number, selected: string | null
 // bucketLabel accepts DQL-friendly duration literals: "1m", "5m", "10m",
 // "30m", "1h", "3h", "6h", "12h", "24h".
 // ---------------------------------------------------------------------------
-export function sharedTimelapseMetricsQuery(days: number, selected: string | null, bucketLabel: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sharedTimelapseMetricsQuery(days: number, selected: string[] | null, bucketLabel: string): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -521,8 +533,8 @@ export function sharedTimelapseMetricsQuery(days: number, selected: string | nul
 // Full geo metrics — includes Apdex components (sat/tol/fru) and Core Web
 // Vitals per country. Used by GeoHeatmapSubTab and WorldMapSubTab.
 // ---------------------------------------------------------------------------
-export function geoFullQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function geoFullQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name) and isNotNull(geo.country.iso_code)${filt}
@@ -553,8 +565,8 @@ export function geoFullQuery(days: number, selected: string | null): string {
 }
 
 // Bucketed version of geoFullQuery for WorldMapSubTab timelapse.
-export function geoFullBucketedQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function geoFullBucketedQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -591,8 +603,8 @@ export function geoFullBucketedQuery(days: number, selected: string | null, buck
 // ---------------------------------------------------------------------------
 
 // Primary Sankey flow: collectArray per session then aggregate s0-s4 counts.
-export function sankeyFlowQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sankeyFlowQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -614,8 +626,8 @@ export function sankeyFlowQuery(days: number, selected: string | null): string {
 }
 
 // Extended paths — full per-session path arrays for loop/endpoint/trends analysis.
-export function sankeyExtendedPathsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sankeyExtendedPathsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -630,8 +642,8 @@ export function sankeyExtendedPathsQuery(days: number, selected: string | null):
 }
 
 // Avg duration per page — for Page Timing sub-tab.
-export function sankeyPageDurationQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sankeyPageDurationQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days)}
     | filter isNotNull(frontend.name)${filt}
@@ -649,8 +661,8 @@ export function sankeyPageDurationQuery(days: number, selected: string | null): 
 }
 
 // Previous-period extended paths — for Path Trends sub-tab comparison.
-export function sankeyPrevPathsQuery(days: number, selected: string | null): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sankeyPrevPathsQuery(days: number, selected: string[] | null): string {
+  const filt = appFilt(selected);
   return `
     fetch user.events, ${periodClause(days, true)}
     | filter isNotNull(frontend.name)${filt}
@@ -665,8 +677,8 @@ export function sankeyPrevPathsQuery(days: number, selected: string | null): str
 }
 
 // Timelapse — per-bucket path aggregations for the Sankey Flow Chart.
-export function sankeyTimelapseQuery(days: number, selected: string | null, bucketLabel?: string): string {
-  const filt = selected ? ` and frontend.name == "${selected.replace(/"/g, '\\"')}"` : "";
+export function sankeyTimelapseQuery(days: number, selected: string[] | null, bucketLabel?: string): string {
+  const filt = appFilt(selected);
   const label = bucketLabel ?? bucketSizeForDays(days).label;
   return `
     fetch user.events, ${periodClause(days)}
@@ -703,10 +715,13 @@ export function sankeyTimelapseQuery(days: number, selected: string | null, buck
 // Session Replay Spotlight — sessions ranked by computed impact score.
 // Uses user.sessions (not user.events) to get native crash/bounce/replay fields.
 // ---------------------------------------------------------------------------
-export function sessionReplayQuery(days: number, selected: string | null): string {
-  const appFilter = selected
-    ? `| filter in(frontend.name, "${selected.replace(/"/g, '\\"')}")`
-    : `| filter isNotNull(frontend.name)`;
+export function sessionReplayQuery(days: number, selected: string[] | null): string {
+  const esc = (s: string) => s.replace(/"/g, '\\"');
+  const appFilter = !selected || selected.length === 0
+    ? `| filter isNotNull(frontend.name)`
+    : selected.length === 1
+      ? `| filter frontend.name == "${esc(selected[0])}"`
+      : `| filter (${selected.map(s => `frontend.name == "${esc(s)}"`).join(" or ")})`;
   return `
     fetch user.sessions, ${periodClause(days)}
     ${appFilter}
