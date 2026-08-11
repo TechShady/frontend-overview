@@ -60,6 +60,24 @@ export const DEFAULT_PERF_BUDGETS = {
 
 export type WebAppFilter = { selected: string[] | null };
 
+export type GradeWeights = {
+  apdex: number;
+  errorRate: number;
+  lcp: number;
+  inp: number;
+  cls: number;
+  ttfb: number;
+};
+
+export const DEFAULT_GRADE_WEIGHTS: GradeWeights = {
+  apdex: 25,
+  errorRate: 22,
+  lcp: 20,
+  inp: 16,
+  cls: 10,
+  ttfb: 7,
+};
+
 type SettingsCtx = {
   timeframeDays: number;
   setTimeframeDays: (d: number) => void;
@@ -69,6 +87,8 @@ type SettingsCtx = {
   setRefreshIntervalMs: (ms: number) => void;
   budgets: typeof DEFAULT_PERF_BUDGETS;
   setBudgets: (b: typeof DEFAULT_PERF_BUDGETS) => void;
+  gradeWeights: GradeWeights;
+  setGradeWeights: (w: GradeWeights) => void;
   tabVisibility: Record<string, boolean>;
   setTabVisibility: (v: Record<string, boolean>) => void;
   toggleTab: (name: string) => void;
@@ -101,6 +121,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [webAppFilter, setWebAppFilter] = useState<WebAppFilter>({ selected: null });
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(0);
   const [budgets, setBudgets] = useState(DEFAULT_PERF_BUDGETS);
+  const [gradeWeights, setGradeWeights] = useState<GradeWeights>(DEFAULT_GRADE_WEIGHTS);
   const [tabVisibility, setTabVisibility] = useState<Record<string, boolean>>(defaultTabVisibility);
   const [subTabVisibility, setSubTabVisibility] = useState<Record<string, boolean>>(defaultSubTabVisibility);
 
@@ -128,6 +149,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof p.timeframeDays === "number") setTimeframeDays(p.timeframeDays);
       if (typeof p.refreshIntervalMs === "number") setRefreshIntervalMs(p.refreshIntervalMs);
       if (p.budgets) setBudgets({ ...DEFAULT_PERF_BUDGETS, ...p.budgets });
+      if (p.gradeWeights) setGradeWeights({ ...DEFAULT_GRADE_WEIGHTS, ...p.gradeWeights });
       if (p.webAppFilter) {
         const waf = p.webAppFilter;
         // Migrate old persisted format (single string → array)
@@ -159,8 +181,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [subTabVisibility]);
 
   useEffect(() => {
-    saveState({ key: PREFS_KEY, body: { value: JSON.stringify({ timeframeDays, refreshIntervalMs, budgets, webAppFilter }) } });
-  }, [timeframeDays, refreshIntervalMs, budgets, webAppFilter]);
+    saveState({ key: PREFS_KEY, body: { value: JSON.stringify({ timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights }) } });
+  }, [timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights]);
 
   const toggleTab = (name: string) => setTabVisibility((v) => ({ ...v, [name]: !v[name] }));
   const resetTabVisibility = () => setTabVisibility(defaultTabVisibility());
@@ -172,9 +194,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     webAppFilter, setWebAppFilter,
     refreshIntervalMs, setRefreshIntervalMs,
     budgets, setBudgets,
+    gradeWeights, setGradeWeights,
     tabVisibility, setTabVisibility, toggleTab, resetTabVisibility,
     subTabVisibility, toggleSubTab, resetSubTabVisibility,
-  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, tabVisibility, subTabVisibility]);
+  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, gradeWeights, tabVisibility, subTabVisibility]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 };

@@ -42,7 +42,9 @@ export function scoreLowerBetter(value: number, good: number, poor: number): num
 export function computeAppScore(
   vitals: Partial<PerAppVitals> | undefined,
   summary: Partial<PerAppSummary> | undefined,
+  weights?: { apdex: number; errorRate: number; lcp: number; inp: number; cls: number; ttfb: number },
 ): { score: number; parts: { label: string; score: number; weight: number }[] } {
+  const w = weights ?? { apdex: 25, errorRate: 22, lcp: 20, inp: 16, cls: 10, ttfb: 7 };
   const lcp = vitals?.lcpAvg ?? NaN;
   const cls = vitals?.clsAvg ?? NaN;
   const inp = vitals?.inpAvg ?? NaN;
@@ -58,12 +60,12 @@ export function computeAppScore(
     : NaN;
 
   const parts = [
-    { label: "LCP",        score: scoreLowerBetter(lcp, CWV.lcp.good, CWV.lcp.poor), weight: 20 },
-    { label: "INP",        score: scoreLowerBetter(inp, CWV.inp.good, CWV.inp.poor), weight: 16 },
-    { label: "CLS",        score: scoreLowerBetter(cls, CWV.cls.good, CWV.cls.poor), weight: 10 },
-    { label: "TTFB",       score: scoreLowerBetter(ttfb, CWV.ttfb.good, CWV.ttfb.poor), weight: 7 },
-    { label: "Error rate", score: scoreLowerBetter(err, 0.5, 5), weight: 22 },
-    { label: "Apdex",      score: apdexScore, weight: 25 },
+    { label: "LCP",        score: scoreLowerBetter(lcp, CWV.lcp.good, CWV.lcp.poor), weight: w.lcp },
+    { label: "INP",        score: scoreLowerBetter(inp, CWV.inp.good, CWV.inp.poor), weight: w.inp },
+    { label: "CLS",        score: scoreLowerBetter(cls, CWV.cls.good, CWV.cls.poor), weight: w.cls },
+    { label: "TTFB",       score: scoreLowerBetter(ttfb, CWV.ttfb.good, CWV.ttfb.poor), weight: w.ttfb },
+    { label: "Error rate", score: scoreLowerBetter(err, 0.5, 5), weight: w.errorRate },
+    { label: "Apdex",      score: apdexScore, weight: w.apdex },
   ];
   const applicable = parts.filter((p) => isFinite(p.score));
   const wTotal = applicable.reduce((a, p) => a + p.weight, 0) || 1;

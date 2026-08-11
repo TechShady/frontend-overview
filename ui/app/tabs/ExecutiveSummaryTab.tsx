@@ -103,7 +103,7 @@ const GradeMetricRow: React.FC<{
 // Main component
 // -----------------------------------------------------------------------------
 export const ExecutiveSummaryTab: React.FC = () => {
-  const { timeframeDays, webAppFilter, setWebAppFilter } = useSettings();
+  const { timeframeDays, webAppFilter, setWebAppFilter, gradeWeights } = useSettings();
   const sel = webAppFilter.selected;
   const tl = useTimelapse();
   const bucketLabel = tl.enabled ? tl.bucket : undefined;
@@ -150,7 +150,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         fcpAvg: Number(v.fcpAvg ?? NaN),
         loadEndAvg: Number(v.loadEndAvg ?? NaN),
       };
-      const { score } = computeAppScore(vitalsRow, summary);
+      const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return { summary, vitals: vitalsRow, score };
     });
   }, [sum.data, vitals.data]);
@@ -181,7 +181,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         clsAvg: Number(v.clsAvg ?? NaN), ttfbAvg: Number(v.ttfbAvg ?? NaN),
         fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
       };
-      const { score } = computeAppScore(vitalsRow, summary);
+      const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return { summary, score };
     }).sort((a, b) => (isFinite(b.score) ? b.score : -1) - (isFinite(a.score) ? a.score : -1));
   }, [allSum.data, allVitals.data]);
@@ -220,7 +220,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         clsAvg:  isFinite(Number(b.cls))  ? Number(b.cls)  : row.vitals.clsAvg,
         ttfbAvg: isFinite(Number(b.ttfb)) ? Number(b.ttfb) : row.vitals.ttfbAvg,
       };
-      const { score } = computeAppScore(vitalsRow, summary);
+      const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return { summary, vitals: vitalsRow, score };
     });
   }, [periodScoredRows, bucketed.data, tl.enabled, tl.index]);
@@ -298,7 +298,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         clsAvg: Number(v.clsAvg ?? NaN), ttfbAvg: Number(v.ttfbAvg ?? NaN),
         fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
       };
-      const { score } = computeAppScore(vitalsRow, summary);
+      const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return {
         application: app, score,
         apdex: summary.apdex, errorRate: summary.errorRate, avgDuration: summary.avgDuration,
@@ -443,17 +443,17 @@ export const ExecutiveSummaryTab: React.FC = () => {
     const tolPct  = sfTotal > 0 ? (tolN / sfTotal) * 100 : 0;
     const fruPct  = sfTotal > 0 ? (fruN / sfTotal) * 100 : 0;
     return [
-      { label: "Apdex",      weight: 25, score: scoreHB(totals.apdex, 0.5, 0.94),          value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",      color: apdexClr(totals.apdex),       indent: false },
-      { label: "Satisfied",  weight: undefined, score: satPct,                              value: `${satPct.toFixed(0)}% (${fmt.num(satN)})`,                  color: GREEN,                        indent: true  },
-      { label: "Tolerating", weight: undefined, score: tolPct,                              value: `${tolPct.toFixed(0)}% (${fmt.num(tolN)})`,                  color: YELLOW,                       indent: true  },
-      { label: "Frustrated", weight: undefined, score: fruPct,                              value: `${fruPct.toFixed(0)}% (${fmt.num(fruN)})`,                  color: RED,                          indent: true  },
-      { label: "Error rate", weight: 22, score: scoreLB(totals.errorRate, 0.5, 5),          value: fmt.pct(totals.errorRate),                                   color: errClr(totals.errorRate),     indent: false },
-      { label: "CWV — LCP",  weight: 20, score: scoreLB(fleetVitals.lcp, 2500, 4000),       value: fmt.ms(fleetVitals.lcp),                                     color: cwvLcpClr(fleetVitals.lcp),   indent: false },
-      { label: "CWV — INP",  weight: 16, score: scoreLB(fleetVitals.inp, 200, 500),         value: fmt.ms(fleetVitals.inp),                                     color: cwvInpClr(fleetVitals.inp),   indent: false },
-      { label: "CWV — CLS",  weight: 10, score: scoreLB(fleetVitals.cls, 0.1, 0.25),        value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls),  indent: false },
-      { label: "CWV — TTFB", weight: 7,  score: scoreLB(fleetVitals.ttfb, 800, 1800),       value: fmt.ms(fleetVitals.ttfb),                                    color: cwvTtfbClr(fleetVitals.ttfb), indent: false },
+      { label: "Apdex",      weight: gradeWeights.apdex,     score: scoreHB(totals.apdex, 0.5, 0.94),          value: isFinite(totals.apdex) ? totals.apdex.toFixed(2) : "—",      color: apdexClr(totals.apdex),       indent: false },
+      { label: "Satisfied",  weight: undefined,               score: satPct,                                    value: `${satPct.toFixed(0)}% (${fmt.num(satN)})`,                  color: GREEN,                        indent: true  },
+      { label: "Tolerating", weight: undefined,               score: tolPct,                                    value: `${tolPct.toFixed(0)}% (${fmt.num(tolN)})`,                  color: YELLOW,                       indent: true  },
+      { label: "Frustrated", weight: undefined,               score: fruPct,                                    value: `${fruPct.toFixed(0)}% (${fmt.num(fruN)})`,                  color: RED,                          indent: true  },
+      { label: "Error rate", weight: gradeWeights.errorRate,  score: scoreLB(totals.errorRate, 0.5, 5),         value: fmt.pct(totals.errorRate),                                   color: errClr(totals.errorRate),     indent: false },
+      { label: "CWV — LCP",  weight: gradeWeights.lcp,        score: scoreLB(fleetVitals.lcp, 2500, 4000),      value: fmt.ms(fleetVitals.lcp),                                     color: cwvLcpClr(fleetVitals.lcp),   indent: false },
+      { label: "CWV — INP",  weight: gradeWeights.inp,        score: scoreLB(fleetVitals.inp, 200, 500),        value: fmt.ms(fleetVitals.inp),                                     color: cwvInpClr(fleetVitals.inp),   indent: false },
+      { label: "CWV — CLS",  weight: gradeWeights.cls,        score: scoreLB(fleetVitals.cls, 0.1, 0.25),       value: isFinite(fleetVitals.cls) ? fleetVitals.cls.toFixed(2) : "—", color: cwvClsClr(fleetVitals.cls),  indent: false },
+      { label: "CWV — TTFB", weight: gradeWeights.ttfb,       score: scoreLB(fleetVitals.ttfb, 800, 1800),      value: fmt.ms(fleetVitals.ttfb),                                    color: cwvTtfbClr(fleetVitals.ttfb), indent: false },
     ];
-  }, [totals, fleetVitals]);
+  }, [totals, fleetVitals, gradeWeights]);
 
   const narrative = useMemo(() => {
     const lines: string[] = [];

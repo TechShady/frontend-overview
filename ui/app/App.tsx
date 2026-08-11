@@ -15,6 +15,7 @@ import { queryExecutionClient } from "@dynatrace-sdk/client-query";
 import {
   SettingsProvider, useSettings,
   TIMEFRAME_OPTIONS, REFRESH_OPTIONS, ALL_TABS, NAV_FLOWS_SUB_TABS,
+  DEFAULT_GRADE_WEIGHTS,
   setQueryAnchorMs, getQueryAnchorMs,
 } from "./SettingsContext";
 import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, SharedBucketMetrics } from "./TimelapseContext";
@@ -511,7 +512,7 @@ const HelpSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, o
 // Settings panel — tab visibility toggles + perf budgets
 // ---------------------------------------------------------------------------
 const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, onDismiss }) => {
-  const { tabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets, subTabVisibility, toggleSubTab } = useSettings();
+  const { tabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets, gradeWeights, setGradeWeights, subTabVisibility, toggleSubTab } = useSettings();
   const visibleCount = ALL_TABS.filter(t => tabVisibility[t] !== false).length;
 
   return (
@@ -565,6 +566,60 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
             <Button variant="default" onClick={resetTabVisibility}>Show all tabs</Button>
           </div>
         </div>
+
+        {/* Grade weights */}
+        {(() => {
+          const total = Object.values(gradeWeights).reduce((a, v) => a + (Number(v) || 0), 0);
+          const ok = Math.round(total) === 100;
+          const WEIGHT_FIELDS: { key: keyof typeof gradeWeights; label: string }[] = [
+            { key: "apdex",     label: "Apdex" },
+            { key: "errorRate", label: "Error rate" },
+            { key: "lcp",       label: "CWV — LCP" },
+            { key: "inp",       label: "CWV — INP" },
+            { key: "cls",       label: "CWV — CLS" },
+            { key: "ttfb",      label: "CWV — TTFB" },
+          ];
+          return (
+            <div style={{ marginBottom: 18, border: "1px solid rgba(128,128,128,0.25)", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ padding: "10px 12px", background: "rgba(128,128,128,0.08)", borderBottom: "1px solid rgba(128,128,128,0.15)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <Strong style={{ fontSize: 13 }}>Grade Weights</Strong>
+                  <Text style={{ fontSize: 11, opacity: 0.65, display: "block", marginTop: 2 }}>
+                    Weights used to compute the overall fleet grade. Must sum to 100%.
+                  </Text>
+                </div>
+                <Button variant="default" onClick={() => setGradeWeights(DEFAULT_GRADE_WEIGHTS)}>Reset</Button>
+              </div>
+              <div style={{ padding: "10px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px" }}>
+                {WEIGHT_FIELDS.map(({ key, label }) => (
+                  <label key={key} style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                    <span style={{ opacity: 0.75 }}>{label} (%)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={gradeWeights[key]}
+                      onChange={(e) => setGradeWeights({ ...gradeWeights, [key]: Number(e.target.value) })}
+                      style={{
+                        background: "rgba(128,128,128,0.08)",
+                        color: "inherit",
+                        border: "1px solid rgba(128,128,128,0.3)",
+                        borderRadius: 4, padding: "4px 8px",
+                        fontFamily: "monospace",
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+              <div style={{ padding: "8px 12px", borderTop: "1px solid rgba(128,128,128,0.15)", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>Total:</span>
+                <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "monospace", color: ok ? "var(--dt-colors-text-success-default, #0D9C29)" : "var(--dt-colors-text-critical-default, #C21930)" }}>
+                  {total}% {ok ? "✓" : "✗ — must equal 100%"}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Perf budgets */}
         <div style={{ border: "1px solid rgba(128,128,128,0.25)", borderRadius: 8, overflow: "hidden" }}>
