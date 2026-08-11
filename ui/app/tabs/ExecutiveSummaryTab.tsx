@@ -153,7 +153,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
       const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return { summary, vitals: vitalsRow, score };
     });
-  }, [sum.data, vitals.data]);
+  }, [sum.data, vitals.data, gradeWeights]);
 
   const allAppsScoredRows = useMemo(() => {
     const vByApp: Record<string, any> = {};
@@ -184,7 +184,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
       const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
       return { summary, score };
     }).sort((a, b) => (isFinite(b.score) ? b.score : -1) - (isFinite(a.score) ? a.score : -1));
-  }, [allSum.data, allVitals.data]);
+  }, [allSum.data, allVitals.data, gradeWeights]);
 
   // When Timelapse is playing, rebuild scoredRows from the per-bucket per-app data.
   // This makes the grade breakdown, table, and everything downstream animate with playback.
@@ -305,7 +305,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         satisfied: summary.satisfied, tolerating: summary.tolerating, frustrated: summary.frustrated,
       };
     });
-  }, [prevByApp, prevVitals.data]);
+  }, [prevByApp, prevVitals.data, gradeWeights]);
 
   // Business Impact stats (#3) — always shown; delta shown when prior period data exists
   const impactStats = useMemo(() => {
@@ -603,7 +603,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
     <div>
       <div style="font-size: 20px; font-weight: 700;">Fleet Grade</div>
       <div class="score">Weighted score: <b>${isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"} / 100</b></div>
-      <div style="font-size: 12px; color: #888; margin-top: 6px;">Blend of Apdex (25%), Error rate (22%), CWV — LCP (20%), INP (16%), CLS (10%), TTFB (7%)</div>
+      <div style="font-size: 12px; color: #888; margin-top: 6px;">Blend of Apdex (${gradeWeights.apdex}%), Error rate (${gradeWeights.errorRate}%), CWV — LCP (${gradeWeights.lcp}%), INP (${gradeWeights.inp}%), CLS (${gradeWeights.cls}%), TTFB (${gradeWeights.ttfb}%)</div>
     </div>
   </div>
 
@@ -730,7 +730,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Overall Fleet Grade</div>
           <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>Weighted score: <b>{isFinite(fleetScore) ? fleetScore.toFixed(1) : "—"}</b> / 100</div>
-          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>Blend of Apdex (25%), Error rate (22%), CWV — LCP (20%), INP (16%), CLS (10%), TTFB (7%). Apdex uses satisfied/tolerating/frustrated counts.</div>
+          <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>Blend of Apdex ({gradeWeights.apdex}%), Error rate ({gradeWeights.errorRate}%), CWV — LCP ({gradeWeights.lcp}%), INP ({gradeWeights.inp}%), CLS ({gradeWeights.cls}%), TTFB ({gradeWeights.ttfb}%). Apdex uses satisfied/tolerating/frustrated counts.</div>
         </div>
       </div>
 
