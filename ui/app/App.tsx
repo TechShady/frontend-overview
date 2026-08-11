@@ -105,7 +105,8 @@ const AppHeader: React.FC<{
     }
     const lower = appFilterPhrase.toLowerCase();
     const matched = webApps.filter(a => a.name.toLowerCase().includes(lower)).map(a => a.name);
-    setWebAppFilter({ selected: matched.length > 0 ? matched : null });
+    // If phrase matches everything (or nothing), treat as no filter
+    setWebAppFilter({ selected: matched.length > 0 && matched.length < webApps.length ? matched : null });
   }, [appFilterPhrase, webApps]);
 
   // Hotness diagnosis panel — draggable, portaled to body.

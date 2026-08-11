@@ -1,8 +1,10 @@
 import { periodClause, webAppFilterClause } from "./SettingsContext";
 
 // Inline ` and frontend.name == ...` fragment for multi-select filter.
+// Cap at 50 apps — beyond that the DQL query becomes too large and returns nothing.
 function appFilt(selected: string[] | null, field = "frontend.name"): string {
   if (!selected || selected.length === 0) return "";
+  if (selected.length > 50) return "";
   const esc = (s: string) => s.replace(/"/g, '\\"');
   if (selected.length === 1) return ` and ${field} == "${esc(selected[0])}"`;
   const conditions = selected.map(s => `${field} == "${esc(s)}"`).join(" or ");

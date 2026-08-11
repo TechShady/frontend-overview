@@ -217,6 +217,7 @@ export function periodClause(days: number, prev = false): string {
 
 export function webAppFilterClause(selected: string[] | null, field = "application"): string {
   if (!selected || selected.length === 0) return "";
+  if (selected.length > 50) return "";
   const esc = (s: string) => s.replace(/"/g, '\\"');
   if (selected.length === 1) return ` | filter ${field} == "${esc(selected[0])}"`;
   const conditions = selected.map(s => `${field} == "${esc(s)}"`).join(" or ");
