@@ -411,8 +411,9 @@ export const ExecutiveSummaryTab: React.FC = () => {
 
   const reportCardRows = useMemo(() => {
     if (tl.enabled) return [...scoredRows].sort((a, b) => (isFinite(b.score) ? b.score : -1) - (isFinite(a.score) ? a.score : -1));
+    if (sel) return allAppsScoredRows.filter(r => sel.includes(r.summary.application));
     return allAppsScoredRows;
-  }, [tl.enabled, scoredRows, allAppsScoredRows]);
+  }, [tl.enabled, scoredRows, allAppsScoredRows, sel]);
 
   const { panel: aiPanel } = useAIInsights(useCallback(() =>
     analyzeExecutiveSummary(
@@ -801,10 +802,9 @@ export const ExecutiveSummaryTab: React.FC = () => {
         </>
       )}
 
-      {/* Report Card — always unfiltered, one card per app */}
       <SectionHeader
         title="Report Card"
-        subtitle={tl.enabled ? "Per-app grade — animates with timelapse playback." : "Per-app grade — always shows all apps. Click a card to focus the rest of this tab, click again to clear."}
+        subtitle={tl.enabled ? "Per-app grade — animates with timelapse playback." : sel ? `Per-app grade — ${reportCardRows.length} app${reportCardRows.length === 1 ? "" : "s"} selected. Click a card to toggle focus.` : "Per-app grade — all apps. Click a card to focus the rest of this tab, click again to clear."}
       />
       <div style={{ padding: "0 20px 20px", display: "flex", flexWrap: "wrap", gap: 10 }}>
         {reportCardRows.map(({ summary, score }) => {

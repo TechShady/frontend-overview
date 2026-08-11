@@ -32,7 +32,7 @@ export function webAppInventoryQuery(days: number): string {
         actions = count(),
         by:{application = frontend.name}
     | sort sessions desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -65,7 +65,7 @@ export function webAppSummaryQuery(days: number, selected: string[] | null, prev
         newUsers = 0,
         bounceRate = 0.0
     | sort sessions desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -104,7 +104,7 @@ export function webVitalsPerAppQuery(days: number, selected: string[] | null, pr
         samples = count(),
         by:{application = frontend.name}
     | sort samples desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -130,7 +130,7 @@ export function deviceSegmentsQuery(days: number, selected: string[] | null): st
         errorRate = (toDouble(errors) / (toDouble(actions) + 0.0001)) * 100,
         apdex = (toDouble(satisfied) + toDouble(tolerating) * 0.5) / (toDouble(satisfied + tolerating + frustrated) + 0.0001)
     | sort sessions desc
-    | limit 2000
+    | limit 4000
   `;
 }
 
@@ -146,7 +146,7 @@ export function webVitalsFromEventsQuery(days: number, selected: string[] | null
         sessions = countDistinct(dt.rum.session.id),
         by:{application = frontend.name}
     | sort sessions desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -166,7 +166,7 @@ export function errorsPerAppQuery(days: number, selected: string[] | null, prev 
         errorRate = (toDouble(totalErrors) / (toDouble(totalActions) + 0.0001)) * 100,
         errSessionsPct = (toDouble(errSessions) / (toDouble(sessions) + 0.0001)) * 100
     | sort errorRate desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -230,7 +230,7 @@ export function resourceConsumptionQuery(days: number, selected: string[] | null
         avgBytesPerView = 0.0,
         avgRequestsPerView = if(pageViews > 0, toDouble(totalRequests) / toDouble(pageViews), else: 0.0)
     | sort totalRequests desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -250,7 +250,7 @@ export function thirdPartyImpactQuery(days: number, selected: string[] | null): 
         thirdPartyRequests = 0,
         thirdPartyBytesPct = 0.0
     | sort totalActions desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -266,7 +266,7 @@ export function trafficTimeseriesQuery(days: number, selected: string[] | null):
         by:{application = frontend.name},
         interval:1h
     | sort application asc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -621,7 +621,7 @@ export function sankeyFlowQuery(days: number, selected: string[] | null): string
         s4 = if(pathLen >= 5, path[4], else: "(exit)")
     | summarize sessions = count(), by: {s0, s1, s2, s3, s4}
     | sort sessions desc
-    | limit 200
+    | limit 400
   `;
 }
 
@@ -707,7 +707,7 @@ export function sankeyTimelapseQuery(days: number, selected: string[] | null, bu
         s2 = top_paths[s2], s3 = top_paths[s3],
         s4 = top_paths[s4], sessions = top_paths[sessions]
     | sort bucket asc, sessions desc
-    | limit 200000
+    | limit 400000
   `;
 }
 
