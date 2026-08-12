@@ -42,10 +42,10 @@ export function webAppInventoryQuery(days: number): string {
 // Note: `dt.rum.user.id` is mostly null in this tenant → use session count as a proxy.
 // `avgDuration` returned in ms (converted from nanoseconds). Apdex uses 3s / 12s
 // thresholds on user_action/user_interaction events (industry standard).
-export function webAppSummaryQuery(days: number, selected: string[] | null, prev = false): string {
+export function webAppSummaryQuery(days: number, selected: string[] | null, prev = false, prevPrev = false): string {
   const filt = appFilt(selected);
   return `
-    fetch user.events, ${periodClause(days, prev)}
+    fetch user.events, ${periodClause(days, prev, prevPrev)}
     | filter isNotNull(frontend.name)${filt}
     | fieldsAdd dur_ms = toDouble(duration) / 1000000.0,
         isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation"
@@ -73,10 +73,10 @@ export function webAppSummaryQuery(days: number, selected: string[] | null, prev
 
 // Core Web Vitals per web app — from user.events (metric namespace unavailable in guu84124).
 // Values converted from nanoseconds → milliseconds. CLS remains unitless.
-export function webVitalsPerAppQuery(days: number, selected: string[] | null, prev = false): string {
+export function webVitalsPerAppQuery(days: number, selected: string[] | null, prev = false, prevPrev = false): string {
   const filt = appFilt(selected);
   return `
-    fetch user.events, ${periodClause(days, prev)}
+    fetch user.events, ${periodClause(days, prev, prevPrev)}
     | filter isNotNull(frontend.name)${filt}
     | filter isNotNull(web_vitals.largest_contentful_paint)
        or isNotNull(web_vitals.interaction_to_next_paint)

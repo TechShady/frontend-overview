@@ -6,11 +6,13 @@ import { useUserAppState, useSetUserAppState } from "@dynatrace-sdk/react-hooks"
 export const ALL_TABS: string[] = [
   "Executive Summary",
   "Performance Overview",
+  "Opportunity Matrix",
   "Errors & Reliability",
   "Navigation & Flows",
   "Cost & Ranking",
   "Perf Budgets",
   "Hyperlyzer",
+  "Action Backlog",
 ];
 
 export const NAV_FLOWS_SUB_TABS: { id: string; label: string }[] = [
@@ -78,6 +80,22 @@ export const DEFAULT_GRADE_WEIGHTS: GradeWeights = {
   ttfb: 7,
 };
 
+// Industry CWV benchmarks — typical P75 values (ms/unitless) from HTTP Archive / CrUX.
+// Used by the Executive Summary to contextualise fleet metrics vs industry peers.
+export type IndustryBenchmark = { lcp: number; inp: number; cls: number; ttfb: number };
+export const INDUSTRY_BENCHMARKS: Record<string, IndustryBenchmark> = {
+  "E-commerce":        { lcp: 3200, inp: 280, cls: 0.12, ttfb: 950 },
+  "Finance":           { lcp: 2800, inp: 200, cls: 0.06, ttfb: 700 },
+  "Media / News":      { lcp: 3800, inp: 320, cls: 0.18, ttfb: 1100 },
+  "Technology / SaaS": { lcp: 2900, inp: 230, cls: 0.09, ttfb: 800 },
+  "Government":        { lcp: 4200, inp: 360, cls: 0.15, ttfb: 1400 },
+  "Healthcare":        { lcp: 3100, inp: 260, cls: 0.10, ttfb: 900 },
+  "Travel":            { lcp: 3500, inp: 295, cls: 0.13, ttfb: 1000 },
+  "Education":         { lcp: 3300, inp: 275, cls: 0.11, ttfb: 950 },
+  "Retail / B2B":      { lcp: 2700, inp: 210, cls: 0.07, ttfb: 750 },
+};
+export const INDUSTRY_NAMES = Object.keys(INDUSTRY_BENCHMARKS);
+
 type SettingsCtx = {
   timeframeDays: number;
   setTimeframeDays: (d: number) => void;
@@ -89,6 +107,8 @@ type SettingsCtx = {
   setBudgets: (b: typeof DEFAULT_PERF_BUDGETS) => void;
   gradeWeights: GradeWeights;
   setGradeWeights: (w: GradeWeights) => void;
+  industry: string;
+  setIndustry: (s: string) => void;
   tabVisibility: Record<string, boolean>;
   setTabVisibility: (v: Record<string, boolean>) => void;
   toggleTab: (name: string) => void;
@@ -122,6 +142,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(0);
   const [budgets, setBudgets] = useState(DEFAULT_PERF_BUDGETS);
   const [gradeWeights, setGradeWeights] = useState<GradeWeights>(DEFAULT_GRADE_WEIGHTS);
+  const [industry, setIndustry] = useState<string>("");
   const [tabVisibility, setTabVisibility] = useState<Record<string, boolean>>(defaultTabVisibility);
   const [subTabVisibility, setSubTabVisibility] = useState<Record<string, boolean>>(defaultSubTabVisibility);
 
@@ -150,6 +171,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (typeof p.refreshIntervalMs === "number") setRefreshIntervalMs(p.refreshIntervalMs);
       if (p.budgets) setBudgets({ ...DEFAULT_PERF_BUDGETS, ...p.budgets });
       if (p.gradeWeights) setGradeWeights({ ...DEFAULT_GRADE_WEIGHTS, ...p.gradeWeights });
+      if (typeof p.industry === "string") setIndustry(p.industry);
       if (p.webAppFilter) {
         const waf = p.webAppFilter;
         // Migrate old persisted format (single string → array)
@@ -181,8 +203,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [subTabVisibility]);
 
   useEffect(() => {
-    saveState({ key: PREFS_KEY, body: { value: JSON.stringify({ timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights }) } });
-  }, [timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights]);
+    saveState({ key: PREFS_KEY, body: { value: JSON.stringify({ timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights, industry }) } });
+  }, [timeframeDays, refreshIntervalMs, budgets, webAppFilter, gradeWeights, industry]);
 
   const toggleTab = (name: string) => setTabVisibility((v) => ({ ...v, [name]: !v[name] }));
   const resetTabVisibility = () => setTabVisibility(defaultTabVisibility());
@@ -195,9 +217,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshIntervalMs, setRefreshIntervalMs,
     budgets, setBudgets,
     gradeWeights, setGradeWeights,
+    industry, setIndustry,
     tabVisibility, setTabVisibility, toggleTab, resetTabVisibility,
     subTabVisibility, toggleSubTab, resetSubTabVisibility,
-  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, gradeWeights, tabVisibility, subTabVisibility]);
+  }), [timeframeDays, webAppFilter, refreshIntervalMs, budgets, gradeWeights, industry, tabVisibility, subTabVisibility]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 };
@@ -218,11 +241,12 @@ export function setQueryAnchorMs(ms: number | null) { CURRENT_ANCHOR_MS = ms; }
 export function getQueryAnchorMs(): number | null { return CURRENT_ANCHOR_MS; }
 function toIso(ms: number): string { return new Date(ms).toISOString(); }
 
-export function periodClause(days: number, prev = false): string {
+export function periodClause(days: number, prev = false, prevPrev = false): string {
   const d = Math.max(0.0007, days); // ~1 min minimum
+  const offset = prevPrev ? 2 : prev ? 1 : 0;
   if (CURRENT_ANCHOR_MS != null) {
     const durMs = d * 86400000;
-    const to = prev ? CURRENT_ANCHOR_MS - durMs : CURRENT_ANCHOR_MS;
+    const to = CURRENT_ANCHOR_MS - offset * durMs;
     const from = to - durMs;
     return `from: "${toIso(from)}", to: "${toIso(to)}"`;
   }
@@ -234,6 +258,7 @@ export function periodClause(days: number, prev = false): string {
   const n = unit === "d" ? Math.round(totalMinutes / 1440)
           : unit === "h" ? Math.round(totalMinutes / 60)
           : totalMinutes;
+  if (prevPrev) return `from: now()-${n * 3}${unit}, to: now()-${n * 2}${unit}`;
   if (prev) return `from: now()-${n * 2}${unit}, to: now()-${n}${unit}`;
   return `from: now()-${n}${unit}`;
 }

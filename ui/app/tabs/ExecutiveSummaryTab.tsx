@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback } from "react";
 import { useAIInsights, analyzeExecutiveSummary } from "../components/AIInsights";
-import { useSettings } from "../SettingsContext";
+import { useSettings, INDUSTRY_BENCHMARKS } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery, webAppBucketedMetricsQuery } from "../queries";
 import { computeAppScore, computeFleetScore } from "../scoring";
@@ -103,15 +103,17 @@ const GradeMetricRow: React.FC<{
 // Main component
 // -----------------------------------------------------------------------------
 export const ExecutiveSummaryTab: React.FC = () => {
-  const { timeframeDays, webAppFilter, setWebAppFilter, gradeWeights } = useSettings();
+  const { timeframeDays, webAppFilter, setWebAppFilter, gradeWeights, industry } = useSettings();
   const sel = webAppFilter.selected;
   const tl = useTimelapse();
   const bucketLabel = tl.enabled ? tl.bucket : undefined;
 
   const sum = useDql(webAppSummaryQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prev = useDql(webAppSummaryQuery(timeframeDays, sel, true), [timeframeDays, sel]);
+  const prevPrevSum = useDql(webAppSummaryQuery(timeframeDays, sel, false, true), [timeframeDays, sel]);
   const vitals = useDql(webVitalsPerAppQuery(timeframeDays, sel), [timeframeDays, sel]);
   const prevVitals = useDql(webVitalsPerAppQuery(timeframeDays, sel, true), [timeframeDays, sel]);
+  const prevPrevVitals = useDql(webVitalsPerAppQuery(timeframeDays, sel, false, true), [timeframeDays, sel]);
   const bucketed = useDql(webAppBucketedMetricsQuery(timeframeDays, sel, bucketLabel), [timeframeDays, sel, bucketLabel]);
 
   // Unfiltered queries for Report Card — always shows every app regardless of header filter
@@ -307,6 +309,37 @@ export const ExecutiveSummaryTab: React.FC = () => {
     });
   }, [prevByApp, prevVitals.data, gradeWeights]);
 
+  // Two-periods-ago scores — used by Regression Watchlist to confirm multi-period trend
+  const prevPrevByApp: Record<string, any> = useMemo(() => {
+    const out: Record<string, any> = {};
+    (prevPrevSum.data?.records ?? []).forEach((r: any) => { out[String(r.application ?? "")] = r; });
+    return out;
+  }, [prevPrevSum.data]);
+
+  const prevPrevScoredRows = useMemo(() => {
+    const ppvByApp: Record<string, any> = {};
+    (prevPrevVitals.data?.records ?? []).forEach((r: any) => { ppvByApp[String(r.application ?? "")] = r; });
+    return Object.entries(prevPrevByApp).map(([app, rr]) => {
+      const r = rr as any;
+      const v = ppvByApp[app] || {};
+      const summary = {
+        application: app, sessions: Number(r.sessions ?? 0), actions: Number(r.actions ?? 0),
+        errors: Number(r.errors ?? 0), avgDuration: Number(r.avgDuration ?? 0), apdex: Number(r.apdex ?? 0),
+        satisfied: Number(r.satisfied ?? 0), tolerating: Number(r.tolerating ?? 0),
+        frustrated: Number(r.frustrated ?? 0), errorRate: Number(r.errorRate ?? 0),
+        users: 0, bounceRate: 0, newUsers: 0, bounces: 0,
+      };
+      const vitalsRow = {
+        application: app,
+        lcpAvg: Number(v.lcpAvg ?? NaN), inpAvg: Number(v.inpAvg ?? NaN),
+        clsAvg: Number(v.clsAvg ?? NaN), ttfbAvg: Number(v.ttfbAvg ?? NaN),
+        fcpAvg: Number(v.fcpAvg ?? NaN), loadEndAvg: Number(v.loadEndAvg ?? NaN),
+      };
+      const { score } = computeAppScore(vitalsRow, summary, gradeWeights);
+      return { application: app, score };
+    });
+  }, [prevPrevByApp, prevPrevVitals.data, gradeWeights]);
+
   // Business Impact stats (#3) — always shown; delta shown when prior period data exists
   const impactStats = useMemo(() => {
     const hasPrev = prevTotals.sessions >= 5 && prevTotals.actions >= 5;
@@ -385,6 +418,51 @@ export const ExecutiveSummaryTab: React.FC = () => {
       .slice(0, 10);
   // Gate on prevVitals being present — prevents false changes from CWV data availability differences
   }, [scoredRows, prevScoredRows, prevVitals.data]);
+
+  // Regression Watchlist — apps with confirmed downward trend across 2 consecutive periods
+  const regressionWatchlist = useMemo(() => {
+    if (!prevScoredRows.length) return [];
+    const prevMap: Record<string, number> = {};
+    prevScoredRows.forEach(r => { prevMap[r.application] = r.score; });
+    const pp2Map: Record<string, number> = {};
+    prevPrevScoredRows.forEach(r => { pp2Map[r.application] = r.score; });
+    return scoredRows
+      .filter(r => isFinite(r.score) && r.summary.sessions >= 5)
+      .map(r => {
+        const app = r.summary.application;
+        const curr = r.score;
+        const p1 = prevMap[app];
+        const p2 = pp2Map[app];
+        if (!isFinite(p1)) return null;
+        const d1 = curr - p1; // current vs prev
+        const d2 = isFinite(p2) ? p1 - p2 : null; // prev vs prevPrev
+        // Consecutive decline: both periods dropped, or single-period sharp drop with bad score
+        const consecutiveDecline = d1 < -4 && d2 != null && d2 < -3;
+        const sharpDrop = d1 < -12 && curr < 70;
+        if (!consecutiveDecline && !sharpDrop) return null;
+        const totalDrop = isFinite(p2) ? curr - p2 : curr - p1;
+        return {
+          application: app,
+          currScore: curr,
+          prevScore: p1,
+          p2Score: isFinite(p2) ? p2 : null,
+          d1,
+          d2,
+          totalDrop,
+          sessions: r.summary.sessions,
+          consecutive: consecutiveDecline,
+          grade: gradeFromScore(curr),
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => {
+        // Sort by traffic × severity
+        const urgencyA = Math.abs(a.totalDrop) * Math.log10(Math.max(10, a.sessions));
+        const urgencyB = Math.abs(b.totalDrop) * Math.log10(Math.max(10, b.sessions));
+        return urgencyB - urgencyA;
+      })
+      .slice(0, 8);
+  }, [scoredRows, prevScoredRows, prevPrevScoredRows]);
 
   const fleetVitals = useMemo(() => {
     let lN = 0, lW = 0, iN = 0, iW = 0, cN = 0, cW = 0, tN = 0, tW = 0;
@@ -801,6 +879,98 @@ export const ExecutiveSummaryTab: React.FC = () => {
           </div>
         </>
       )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Regression Watchlist */}
+      {regressionWatchlist.length > 0 && (
+        <>
+          <SectionHeader
+            title="Regression Watchlist"
+            subtitle="Apps with confirmed downward score trend across consecutive periods. Sorted by traffic × severity."
+            icon={
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                <path d="M3 5 L17 5 M3 10 L13 10 M3 15 L9 15" stroke={RED} strokeWidth="1.8" strokeLinecap="round" />
+                <path d="M15 12 L18 16 L12 16 Z" fill={RED} />
+              </svg>
+            }
+          />
+          <div style={{ margin: "0 20px 8px" }}>
+            {regressionWatchlist.map((w) => {
+              const p2Label = w.p2Score != null ? `${w.p2Score.toFixed(0)} → ` : "";
+              const trendStr = `${p2Label}${w.prevScore.toFixed(0)} → ${w.currScore.toFixed(0)}`;
+              return (
+                <div key={w.application} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderRadius: 8, background: `${RED}08`, border: `1px solid ${RED}30`, marginBottom: 4 }}>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: w.grade.color, minWidth: 36, textAlign: "center" }}>{w.grade.letter}</div>
+                  <div style={{ minWidth: 170, fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{w.application}</div>
+                  <div style={{ fontSize: 11, fontFamily: "monospace", opacity: 0.7, minWidth: 130 }}>
+                    score: {trendStr}
+                  </div>
+                  <div style={{ fontSize: 12, fontFamily: "monospace", color: RED, fontWeight: 700, minWidth: 70 }}>
+                    {w.totalDrop.toFixed(0)} pts {w.consecutive ? "↘↘" : "↘"}
+                  </div>
+                  <div style={{ fontSize: 10, opacity: 0.5 }}>{fmt.num(w.sessions)} sessions</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Industry Benchmarks */}
+      {(() => {
+        const bench = industry ? INDUSTRY_BENCHMARKS[industry] : null;
+        if (!bench) return null;
+        const metrics: { label: string; fleet: number; ref: number; unit: string; lowerBetter: boolean }[] = [
+          { label: "LCP",  fleet: fleetVitals.lcp,  ref: bench.lcp,  unit: "ms", lowerBetter: true },
+          { label: "INP",  fleet: fleetVitals.inp,  ref: bench.inp,  unit: "ms", lowerBetter: true },
+          { label: "CLS",  fleet: fleetVitals.cls,  ref: bench.cls,  unit: "",   lowerBetter: true },
+          { label: "TTFB", fleet: fleetVitals.ttfb, ref: bench.ttfb, unit: "ms", lowerBetter: true },
+        ];
+        return (
+          <SectionCard title={`Industry Benchmarks — ${industry}`} subtitle="Fleet P50 vs typical industry P75 from CrUX / HTTP Archive. Closer to zero is better.">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {metrics.map(m => {
+                if (!isFinite(m.fleet)) return null;
+                const ratio = m.fleet / m.ref;
+                const pctDiff = ((m.fleet - m.ref) / m.ref) * 100;
+                const better = m.lowerBetter ? m.fleet <= m.ref : m.fleet >= m.ref;
+                const clr = better ? GREEN : Math.abs(pctDiff) < 20 ? YELLOW : RED;
+                const barFleet = Math.min(100, (m.fleet / (m.ref * 1.5)) * 100);
+                const barRef = Math.min(100, (m.ref / (m.ref * 1.5)) * 100);
+                return (
+                  <div key={m.label} style={{ padding: "6px 10px", borderRadius: 6, background: `${clr}08`, border: `1px solid ${clr}25` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 5 }}>
+                      <div style={{ width: 44, fontSize: 12, fontWeight: 700 }}>{m.label}</div>
+                      <div style={{ flex: 1, position: "relative", height: 12 }}>
+                        {/* Reference bar (grey) */}
+                        <div style={{ position: "absolute", top: 3, left: 0, width: `${barRef}%`, height: 6, background: "rgba(128,128,128,0.25)", borderRadius: 3 }} />
+                        {/* Fleet bar */}
+                        <div style={{ position: "absolute", top: 3, left: 0, width: `${barFleet}%`, height: 6, background: clr, borderRadius: 3, opacity: 0.8 }} />
+                      </div>
+                      <div style={{ minWidth: 90, textAlign: "right", fontSize: 11, fontFamily: "monospace" }}>
+                        <span style={{ color: clr, fontWeight: 700 }}>{m.unit === "ms" ? fmt.ms(m.fleet) : m.fleet.toFixed(3)}</span>
+                        <span style={{ opacity: 0.45 }}> vs {m.unit === "ms" ? fmt.ms(m.ref) : m.ref.toFixed(3)}</span>
+                      </div>
+                      <div style={{ minWidth: 64, textAlign: "right", fontSize: 11, fontWeight: 700, color: clr }}>
+                        {pctDiff > 0 ? "+" : ""}{pctDiff.toFixed(0)}%
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.5, paddingLeft: 54 }}>
+                      {better
+                        ? `${Math.abs(pctDiff).toFixed(0)}% better than ${industry} median — maintain this`
+                        : `${Math.abs(pctDiff).toFixed(0)}% slower than ${industry} peers — investigate`}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ fontSize: 10, opacity: 0.4, textAlign: "right", paddingTop: 4 }}>
+                Industry: <strong>{industry}</strong> · Benchmarks reflect typical P75 from public CrUX / HTTP Archive data
+              </div>
+            </div>
+          </SectionCard>
+        );
+      })()}
 
       <SectionHeader
         title="Report Card"
