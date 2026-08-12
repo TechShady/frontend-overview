@@ -205,6 +205,33 @@ export const OpportunityMatrixTab: React.FC = () => {
           <div style={{ fontSize: 12, opacity: 0.45, marginTop: 3 }}>
             Traffic volume (x) vs composite score (y) · use +/− to zoom · drag to pan{showLabels ? ` · zoom ${LABEL_ZOOM_THRESHOLD}× for labels` : ""}
           </div>
+          {/* Score formula breakdown */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            <span style={{ fontSize: 10, opacity: 0.38, textTransform: "uppercase", letterSpacing: 0.6, whiteSpace: "nowrap" }}>Score =</span>
+            {[
+              { label: "Apdex",      weight: gradeWeights.apdex,     tip: "Satisfied/(Sat+Tol+Fru) · 3s/12s thresholds. Mapped 0.5→0, 0.94→100." },
+              { label: "Error rate", weight: gradeWeights.errorRate,  tip: "% actions with errors. ≤0.5% → 100, ≥5% → 0." },
+              { label: "LCP",        weight: gradeWeights.lcp,        tip: "Largest Contentful Paint. ≤2.5 s → 100, ≥4 s → 0." },
+              { label: "INP",        weight: gradeWeights.inp,        tip: "Interaction to Next Paint. ≤200 ms → 100, ≥500 ms → 0." },
+              { label: "CLS",        weight: gradeWeights.cls,        tip: "Cumulative Layout Shift. ≤0.1 → 100, ≥0.25 → 0." },
+              { label: "TTFB",       weight: gradeWeights.ttfb,       tip: "Time to First Byte. ≤800 ms → 100, ≥1800 ms → 0." },
+            ].map((f, i, arr) => (
+              <React.Fragment key={f.label}>
+                <div title={f.tip} style={{
+                  display: "flex", alignItems: "baseline", gap: 3,
+                  fontSize: 11, padding: "2px 8px", borderRadius: 10,
+                  background: "rgba(128,128,128,0.1)",
+                  border: "1px solid rgba(128,128,128,0.18)",
+                  cursor: "default", whiteSpace: "nowrap",
+                }}>
+                  <span style={{ opacity: 0.65 }}>{f.label}</span>
+                  <span style={{ fontWeight: 800, opacity: 0.9 }}>{f.weight}%</span>
+                </div>
+                {i < arr.length - 1 && <span style={{ fontSize: 10, opacity: 0.25 }}>+</span>}
+              </React.Fragment>
+            ))}
+            <span style={{ fontSize: 10, opacity: 0.28, marginLeft: 2 }}>· adjustable in Settings</span>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, opacity: 0.4, whiteSpace: "nowrap" }}>Min sessions:</span>
