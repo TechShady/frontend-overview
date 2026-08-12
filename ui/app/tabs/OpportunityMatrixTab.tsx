@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useCallback } from "react";
 import { useSettings } from "../SettingsContext";
 import { useDql } from "../useDql";
 import { webAppSummaryQuery, webVitalsPerAppQuery } from "../queries";
@@ -78,24 +78,15 @@ export const OpportunityMatrixTab: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef       = useRef<SVGSVGElement>(null);
 
-  // Non-passive wheel handler for zoom-to-cursor
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect  = svg.getBoundingClientRect();
-      const mx    = ((e.clientX - rect.left)  / rect.width)  * VW;
-      const my    = ((e.clientY - rect.top)   / rect.height) * VH;
-      const f     = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setVp(prev => {
-        const z = Math.max(1, Math.min(12, prev.zoom * f));
-        const s = z / prev.zoom;
-        return { zoom: z, tx: mx - s * (mx - prev.tx), ty: my - s * (my - prev.ty) };
-      });
-    };
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
+  // Zoom toward the chart centre (used by +/− buttons)
+  const zoomTo = useCallback((target: number) => {
+    const newZoom = Math.max(1, Math.min(12, target));
+    setVp(prev => {
+      const s  = newZoom / prev.zoom;
+      const mx = X_MID;
+      const my = PT + IH / 2;
+      return { zoom: newZoom, tx: mx - s * (mx - prev.tx), ty: my - s * (my - prev.ty) };
+    });
   }, []);
 
   // Build scored rows
@@ -212,7 +203,7 @@ export const OpportunityMatrixTab: React.FC = () => {
         <div>
           <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: 0.1 }}>Opportunity Matrix</div>
           <div style={{ fontSize: 12, opacity: 0.45, marginTop: 3 }}>
-            Traffic volume (x) vs composite score (y) · scroll to zoom · drag to pan{showLabels ? ` · zoom ${LABEL_ZOOM_THRESHOLD}× for labels` : ""}
+            Traffic volume (x) vs composite score (y) · use +/− to zoom · drag to pan{showLabels ? ` · zoom ${LABEL_ZOOM_THRESHOLD}× for labels` : ""}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -226,11 +217,6 @@ export const OpportunityMatrixTab: React.FC = () => {
           <button onClick={() => setShowLabels(v => !v)} style={chipStyle(showLabels)}>
             Labels {showLabels ? "ON" : "OFF"}
           </button>
-          {vp.zoom > 1.05 && (
-            <button onClick={() => setVp({ tx: 0, ty: 0, zoom: 1 })} style={chipStyle(false)}>
-              Reset · {vp.zoom.toFixed(1)}×
-            </button>
-          )}
         </div>
       </div>
 
@@ -371,7 +357,7 @@ export const OpportunityMatrixTab: React.FC = () => {
           {showLabels && vp.zoom < LABEL_ZOOM_THRESHOLD && (
             <text x={VW - PR - 6} y={PT + 16} textAnchor="end"
               fontSize={10} fill={`${BLUE}cc`}>
-              scroll to zoom · labels at {LABEL_ZOOM_THRESHOLD}×
+              use +/− buttons · labels at {LABEL_ZOOM_THRESHOLD}×
             </text>
           )}
 
@@ -381,6 +367,47 @@ export const OpportunityMatrixTab: React.FC = () => {
             {rows.length} apps
           </text>
         </svg>
+
+        {/* ── Zoom controls ── */}
+        <div style={{
+          position: "absolute", bottom: 12, right: 12,
+          display: "flex", flexDirection: "column", gap: 3, zIndex: 15,
+        }}>
+          {[
+            { label: "+", action: () => zoomTo(vp.zoom * 1.5), title: "Zoom in" },
+            { label: "−", action: () => zoomTo(vp.zoom / 1.5), title: "Zoom out", disabled: vp.zoom <= 1.05 },
+          ].map(btn => (
+            <button key={btn.label} onClick={btn.action} title={btn.title} disabled={btn.disabled}
+              style={{
+                width: 30, height: 30, borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(14,14,20,0.88)",
+                color: btn.disabled ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.85)",
+                fontSize: 18, fontWeight: 300, lineHeight: 1,
+                cursor: btn.disabled ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                backdropFilter: "blur(4px)",
+                transition: "background 0.12s",
+              }}>
+              {btn.label}
+            </button>
+          ))}
+          {vp.zoom > 1.05 && (
+            <button onClick={() => setVp({ tx: 0, ty: 0, zoom: 1 })} title="Reset zoom"
+              style={{
+                width: 30, height: 30, borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.18)",
+                background: "rgba(14,14,20,0.88)",
+                color: "rgba(255,255,255,0.55)",
+                fontSize: 9, fontWeight: 700, lineHeight: 1,
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                backdropFilter: "blur(4px)",
+              }}>
+              1×
+            </button>
+          )}
+        </div>
 
         {/* ── Hover tooltip ── */}
         {tooltip && (
