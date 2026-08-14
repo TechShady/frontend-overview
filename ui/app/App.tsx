@@ -767,7 +767,22 @@ const AppInner: React.FC = () => {
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-  const [timeframeRaw, setTimeframeRaw] = useState<Timeframe | null>(null);
+  // Initialize from persisted timeframeDays so the gap-fill has valid absolute
+  // dates on first render — without this, timeframeRaw stays null until the
+  // user actively clicks the TimeframeSelector, leaving the bucket count driven
+  // by the stale persisted timeframeDays setting.
+  const [timeframeRaw, setTimeframeRaw] = useState<Timeframe | null>(() => {
+    const now = Date.now();
+    const fromMs = now - timeframeDays * 86400000;
+    const totalMinutes = Math.round(timeframeDays * 1440);
+    const expr = totalMinutes === 24 * 60 ? "now()-24h"
+               : totalMinutes < 24 * 60  ? `now()-${totalMinutes}m`
+               : `now()-${Math.round(timeframeDays)}d`;
+    return {
+      from: { absoluteDate: new Date(fromMs).toISOString(), value: expr, type: "expression" as const },
+      to:   { absoluteDate: new Date(now).toISOString(),    value: "now()", type: "expression" as const },
+    };
+  });
   const [forecastModal, setForecastModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
   // Correlations: KpiCards auto-register their sparklines here; the panel opens on "Related Metrics".
   // Registry is keyed by label (last write wins) so we always show the freshest sparkline.
