@@ -470,8 +470,8 @@ export function HotnessAssistPanel({
     }).join("");
     const threshLines = [{ z: 0.75, c: "#FFF04D" }, { z: 1.5, c: "#FF3D9A" }, { z: 2.5, c: "#FF073A" }]
       .map(({ z, c }) => `<line x1="0" y1="${130 - (z / rMaxZ) * 106}" x2="${svgW}" y2="${130 - (z / rMaxZ) * 106}" stroke="${c}" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.4"/>`).join("");
-    const wMark = `<line x1="${data.worstIdx * 6 + 3}" y1="24" x2="${data.worstIdx * 6 + 3}" y2="130" stroke="#FF073A" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.worstIdx * 6 + 5, svgW - 36)}" y="17" font-size="9" fill="#FF073A" font-family="monospace" font-weight="600">worst</text>`;
-    const bMark = data.bestIdx !== data.worstIdx ? `<line x1="${data.bestIdx * 6 + 3}" y1="24" x2="${data.bestIdx * 6 + 3}" y2="130" stroke="#0D9C29" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.bestIdx * 6 + 5, svgW - 28)}" y="17" font-size="9" fill="#0D9C29" font-family="monospace" font-weight="600">best</text>` : "";
+    const wMark = `<line x1="${data.worstIdx * 6 + 3}" y1="24" x2="${data.worstIdx * 6 + 3}" y2="130" stroke="#FF073A" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.worstIdx * 6 + 1, svgW - 14)}" y="18" font-size="13" fill="#FF073A" opacity="0.9">↓</text>`;
+    const bMark = data.bestIdx !== data.worstIdx ? `<line x1="${data.bestIdx * 6 + 3}" y1="24" x2="${data.bestIdx * 6 + 3}" y2="130" stroke="#0D9C29" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.bestIdx * 6 + 1, svgW - 14)}" y="18" font-size="13" fill="#0D9C29" opacity="0.9">↑</text>` : "";
     const worstMetrics = [
       { l: "Sessions",   v: fmtCount(data.worstRow.sessions) },
       { l: "Error Rate", v: fmtPct(data.worstRow.errorRate) },
@@ -594,10 +594,10 @@ ${insightsHtml}
                 return <rect key={i} x={i * 6 + 0.5} y={130 - h} width={5} height={h} fill={color} opacity={i === data.worstIdx || i === data.bestIdx ? 1 : 0.65} rx={0.5} />;
               })}
               <line x1={data.worstIdx * 6 + 3} y1={24} x2={data.worstIdx * 6 + 3} y2={130} stroke={TL_HOT_HIGH} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-              <text x={Math.min(data.worstIdx * 6 + 5, data.allHotness.length * 6 - 36)} y={17} fontSize={9} fill={TL_HOT_HIGH} opacity={0.9} fontFamily="monospace" fontWeight="600">worst</text>
+              <text x={Math.min(data.worstIdx * 6 + 1, data.allHotness.length * 6 - 14)} y={18} fontSize={13} fill={TL_HOT_HIGH} opacity={0.9}>↓</text>
               {data.bestIdx !== data.worstIdx && <>
                 <line x1={data.bestIdx * 6 + 3} y1={24} x2={data.bestIdx * 6 + 3} y2={130} stroke={GREEN} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-                <text x={Math.min(data.bestIdx * 6 + 5, data.allHotness.length * 6 - 28)} y={17} fontSize={9} fill={GREEN} opacity={0.9} fontFamily="monospace" fontWeight="600">best</text>
+                <text x={Math.min(data.bestIdx * 6 + 1, data.allHotness.length * 6 - 14)} y={18} fontSize={13} fill={GREEN} opacity={0.9}>↑</text>
               </>}
             </svg>
             <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 9, opacity: 0.4 }}>

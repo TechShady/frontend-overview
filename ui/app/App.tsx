@@ -863,9 +863,22 @@ const AppInner: React.FC = () => {
     // tenants or short activity windows produce far fewer rows than expected.
     // Generate every slot in the full query range and fill missing ones with
     // zeros so the hotness strip always shows the correct bucket count.
+    //
+    // Prefer the TimeframeSelector's exact absolute dates when available —
+    // this ensures bucket count matches what the user selected even when the
+    // persisted timeframeDays setting lags the current selector display.
+    const tfFromMs = timeframeRaw?.from?.absoluteDate ? Date.parse(timeframeRaw.from.absoluteDate) : NaN;
+    const tfToMs   = timeframeRaw?.to?.absoluteDate   ? Date.parse(timeframeRaw.to.absoluteDate)   : NaN;
     const effectAnchor = timeframeAnchorMs(timeframeRaw);
-    const rangeToMs    = effectAnchor != null ? effectAnchor : Date.now();
-    const rangeFromMs  = rangeToMs - timeframeDays * 86400000;
+    let rangeToMs: number;
+    let rangeFromMs: number;
+    if (isFinite(tfFromMs) && isFinite(tfToMs) && tfToMs > tfFromMs) {
+      rangeFromMs = tfFromMs;
+      rangeToMs   = tfToMs;
+    } else {
+      rangeToMs   = effectAnchor != null ? effectAnchor : Date.now();
+      rangeFromMs = rangeToMs - timeframeDays * 86400000;
+    }
     const alignedStart = Math.floor(rangeFromMs / bucketMs) * bucketMs;
     const gapFilled: SharedBucketMetrics[] = [];
     for (let slot = alignedStart; slot < rangeToMs; slot += bucketMs) {
