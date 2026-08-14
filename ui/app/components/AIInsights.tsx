@@ -147,7 +147,7 @@ function SparkleIcon() {
 // ---------------------------------------------------------------------------
 // StreamText — word-by-word streaming animation, copied from UserJourney.tsx
 // ---------------------------------------------------------------------------
-function StreamText({ text, baseDelay, style }: { text: string; baseDelay: number; style?: React.CSSProperties }) {
+export function StreamText({ text, baseDelay, style }: { text: string; baseDelay: number; style?: React.CSSProperties }) {
   const words = text.split(/(\s+)/);
   let wordIndex = 0;
   return (

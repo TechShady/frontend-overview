@@ -24,6 +24,7 @@ import { DisclaimerModal } from "./components/DisclaimerModal";
 import { useDql } from "./useDql";
 import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
 import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
+import { HotnessAssistButton, HotnessAssistPanel, analyzeHotnessTimelapse, HotnessAssistData } from "./components/HotnessAssist";
 import { ForecastModal } from "./components/ForecastModal";
 import { CorrelationsPanel } from "./components/CorrelationsPanel";
 import { AIInsightsContext } from "./components/AIInsights";
@@ -115,6 +116,22 @@ const AppHeader: React.FC<{
     setWebAppFilter({ selected: matched.length > 0 && matched.length < webApps.length ? matched : null });
   }, [appFilterPhrase, webApps]);
 
+  // Hotness Assist panel state
+  const [hotnessAssistOpen, setHotnessAssistOpen] = useState(false);
+  const [hotnessAssistPos, setHotnessAssistPos] = useState<{ x: number; y: number }>({ x: 48, y: 200 });
+  const hotnessAssistDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const startHotnessAssistDrag = useCallback((e: React.MouseEvent) => {
+    hotnessAssistDragRef.current = { startX: e.clientX, startY: e.clientY, origX: hotnessAssistPos.x, origY: hotnessAssistPos.y };
+    const move = (me: MouseEvent) => {
+      if (!hotnessAssistDragRef.current) return;
+      setHotnessAssistPos({ x: hotnessAssistDragRef.current.origX + me.clientX - hotnessAssistDragRef.current.startX, y: hotnessAssistDragRef.current.origY + me.clientY - hotnessAssistDragRef.current.startY });
+    };
+    const up = () => { hotnessAssistDragRef.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }, [hotnessAssistPos]);
+  useEffect(() => { if (!tl.enabled) setHotnessAssistOpen(false); }, [tl.enabled]);
+
   // Hotness diagnosis panel — draggable, portaled to body.
   const [tlDiagPanel, setTlDiagPanel] = useState<{ pos: { x: number; y: number } } | null>(null);
   const tlDiagDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -153,6 +170,11 @@ const AppHeader: React.FC<{
       ttfb: stat((r) => r.ttfb),
     };
   }, [tl.sharedMetricsAll]);
+
+  const hotnessAssistData: HotnessAssistData | null = useMemo(() => {
+    if (!tl.enabled || tl.sharedMetricsAll.length < 2 || !tlBaselines || tl.hotness.length === 0) return null;
+    return analyzeHotnessTimelapse(tl.sharedMetricsAll, tl.hotness, tlBaselines, tl.bucket);
+  }, [tl.enabled, tl.sharedMetricsAll, tl.hotness, tlBaselines, tl.bucket]);
 
   return (
     <div style={{
@@ -356,9 +378,14 @@ const AppHeader: React.FC<{
             return (
               <div style={{ marginTop: 8, padding: "6px 4px 4px", borderTop: "1px solid rgba(69,137,255,0.15)" }}>
                 <Flex alignItems="center" justifyContent="space-between" style={{ marginBottom: 4 }}>
-                  <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                    Hotness · {tl.hotnessSource || "signal"}
-                  </span>
+                  <Flex alignItems="center" gap={8}>
+                    <span style={{ fontSize: 10, opacity: 0.6, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                      Hotness · {tl.hotnessSource || "signal"}
+                    </span>
+                    {hotnessAssistData && (
+                      <HotnessAssistButton active={hotnessAssistOpen} onClick={() => setHotnessAssistOpen(v => !v)} />
+                    )}
+                  </Flex>
                   <Flex alignItems="center" gap={8}>
                     <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: "#4589FF", borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Normal</span>
                     <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: TL_HOT_ELEV, borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Elevated</span>
@@ -464,6 +491,16 @@ const AppHeader: React.FC<{
           </div>
         );
       })(), document.body)}
+
+      {/* Hotness Assist panel */}
+      {hotnessAssistOpen && hotnessAssistData && (
+        <HotnessAssistPanel
+          data={hotnessAssistData}
+          pos={hotnessAssistPos}
+          onClose={() => setHotnessAssistOpen(false)}
+          onDragStart={startHotnessAssistDrag}
+        />
+      )}
     </div>
   );
 };
