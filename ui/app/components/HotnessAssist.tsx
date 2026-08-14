@@ -45,6 +45,35 @@ function ensureHAStyles() {
   transition: background 0.15s, border-color 0.15s;
 }
 .uj-export-btn:hover { background: rgba(69,137,255,0.2); border-color: rgba(69,137,255,0.5); }
+@keyframes uj-ai-typewriter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.uj-ai-stream-word { display: inline; opacity: 0; animation: uj-ai-typewriter 0.3s ease forwards; }
+.uj-ai-section-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; opacity: 0.5; margin-bottom: 8px;
+}
+.uj-ai-insight-row {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 6px 10px; border-radius: 6px; margin-bottom: 4px;
+}
+.uj-ai-insight-row.good     { background: rgba(13,156,41,0.06);  border-left: 3px solid #0D9C29; }
+.uj-ai-insight-row.warning  { background: rgba(255,131,43,0.06); border-left: 3px solid #FF832B; }
+.uj-ai-insight-row.critical { background: rgba(194,25,48,0.06);  border-left: 3px solid #C21930; }
+.uj-ai-insight-row.info     { background: rgba(69,137,255,0.06); border-left: 3px solid #4589FF; }
+.uj-ai-recommendation {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 8px 12px; border-radius: 6px;
+  background: rgba(128,128,128,0.04); margin-bottom: 4px;
+}
+.uj-ai-rec-badge {
+  font-size: 10px; padding: 2px 6px; border-radius: 3px;
+  font-weight: 700; text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
+}
+.uj-ai-rec-badge.high   { background: rgba(194,25,48,0.12);  color: #C21930; }
+.uj-ai-rec-badge.medium { background: rgba(255,131,43,0.12); color: #FF832B; }
+.uj-ai-rec-badge.low    { background: rgba(128,128,128,0.1); }
 `;
   document.head.appendChild(s);
 }
@@ -400,6 +429,7 @@ export function HotnessAssistPanel({
   onClose: () => void;
   onDragStart: (e: React.MouseEvent<HTMLDivElement>) => void;
 }) {
+  ensureHAStyles();
   const maxZ = Math.max(0.5, ...data.allHotness);
   const summaryWords    = data.summary.split(/\s+/).length;
   const summaryDuration = summaryWords * 60;

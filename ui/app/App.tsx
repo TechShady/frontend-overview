@@ -48,12 +48,28 @@ const TL_HOT_WARM = "#FF3D9A";
 const TL_HOT_HIGH = "#FF073A";
 
 // Convert a Strato Timeframe selection to a "days" duration.
+// Handles both absolute date ranges and relative string ranges like "now()-24h".
 function timeframeToDays(tf: Timeframe | null): number | null {
-  if (!tf?.from?.absoluteDate || !tf?.to?.absoluteDate) return null;
-  const fromMs = Date.parse(tf.from.absoluteDate);
-  const toMs = Date.parse(tf.to.absoluteDate);
-  if (!isFinite(fromMs) || !isFinite(toMs) || toMs <= fromMs) return null;
-  return (toMs - fromMs) / 86400000;
+  if (!tf) return null;
+  // Absolute date range (custom picker)
+  if (tf?.from?.absoluteDate && tf?.to?.absoluteDate) {
+    const fromMs = Date.parse(tf.from.absoluteDate);
+    const toMs = Date.parse(tf.to.absoluteDate);
+    if (isFinite(fromMs) && isFinite(toMs) && toMs > fromMs) return (toMs - fromMs) / 86400000;
+  }
+  // Relative string range: "now()-24h", "now()-7d", "now()-30m", etc.
+  // Cast through any because the Strato type system marks `from` as non-string,
+  // but the runtime value for preset selections is a string like "now()-24h".
+  const fromAny: unknown = (tf as any)?.from;
+  if (typeof fromAny === "string") {
+    const m = fromAny.match(/now\(\)\s*-\s*(\d+(?:\.\d+)?)(m|h|d)/i);
+    if (m) {
+      const n = parseFloat(m[1]);
+      const unit = m[2].toLowerCase();
+      return unit === "d" ? n : unit === "h" ? n / 24 : n / 1440;
+    }
+  }
+  return null;
 }
 // Anchor (epoch ms) for shifted windows; null when "live".
 function timeframeAnchorMs(tf: Timeframe | null): number | null {
