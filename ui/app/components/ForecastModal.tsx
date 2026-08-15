@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 
 // ─── Linear regression forecast ───
-function linearForecast(data: number[], forecastBuckets: number): number[] {
+export function linearForecast(data: number[], forecastBuckets: number): number[] {
   const n = data.length;
   if (n < 2) return new Array(forecastBuckets).fill(data[0] ?? 0);
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
@@ -16,7 +16,7 @@ function linearForecast(data: number[], forecastBuckets: number): number[] {
 }
 
 // ─── Holt-Winters (double exponential smoothing) ───
-function holtWintersForecast(data: number[], forecastBuckets: number, alpha = 0.3, beta = 0.1): number[] {
+export function holtWintersForecast(data: number[], forecastBuckets: number, alpha = 0.3, beta = 0.1): number[] {
   const n = data.length;
   if (n < 2) return new Array(forecastBuckets).fill(data[0] ?? 0);
   let level = data[0];
@@ -32,7 +32,7 @@ function holtWintersForecast(data: number[], forecastBuckets: number, alpha = 0.
 }
 
 // ─── Triple Exponential Smoothing (Holt-Winters Seasonal / Additive) ───
-function tripleExpSmoothingForecast(data: number[], forecastBuckets: number, seasonLength?: number, alpha = 0.3, beta = 0.1, gamma = 0.3): number[] {
+export function tripleExpSmoothingForecast(data: number[], forecastBuckets: number, seasonLength?: number, alpha = 0.3, beta = 0.1, gamma = 0.3): number[] {
   const n = data.length;
   if (n < 4) return holtWintersForecast(data, forecastBuckets, alpha, beta);
   const m = seasonLength ?? detectSeasonLength(data);
@@ -59,7 +59,7 @@ function tripleExpSmoothingForecast(data: number[], forecastBuckets: number, sea
 }
 
 // ─── Prophet-style forecast (piecewise linear trend + Fourier seasonality) ───
-function prophetForecast(data: number[], forecastBuckets: number): number[] {
+export function prophetForecast(data: number[], forecastBuckets: number): number[] {
   const n = data.length;
   if (n < 4) return linearForecast(data, forecastBuckets);
   const numChangepoints = Math.min(Math.max(2, Math.floor(n / 10)), 25);
@@ -114,7 +114,7 @@ function fitFourierSeasonality(detrended: number[], totalLength: number): number
 }
 
 // ─── ARIMA(p, d, q) forecast ───
-function arimaForecast(data: number[], forecastBuckets: number, p = 5, d = 1, q = 2): number[] {
+export function arimaForecast(data: number[], forecastBuckets: number, p = 5, d = 1, q = 2): number[] {
   const n = data.length;
   if (n < p + d + 2) return linearForecast(data, forecastBuckets);
   let diffed = [...data];
@@ -155,7 +155,7 @@ function arimaForecast(data: number[], forecastBuckets: number, p = 5, d = 1, q 
 }
 
 // ─── SARIMA(p, d, q)(P, D, Q, m) forecast ───
-function sarimaForecast(data: number[], forecastBuckets: number, p = 3, d = 1, q = 1, P = 1, D = 1, Q = 1, m?: number): number[] {
+export function sarimaForecast(data: number[], forecastBuckets: number, p = 3, d = 1, q = 1, P = 1, D = 1, Q = 1, m?: number): number[] {
   const n = data.length;
   const season = m ?? detectSeasonLength(data);
   if (n < season * 2 + p + d) return arimaForecast(data, forecastBuckets, p, d, q);
@@ -321,7 +321,7 @@ function fitSeasonalMA(residuals: number[], order: number, season: number): numb
 }
 
 // ─── Confidence band (based on historical std dev) ───
-function confidenceBand(data: number[], forecast: number[]): { upper: number[]; lower: number[] } {
+export function confidenceBand(data: number[], forecast: number[]): { upper: number[]; lower: number[] } {
   const n = data.length;
   if (n < 2) return { upper: forecast, lower: forecast };
   const mean = data.reduce((a, b) => a + b, 0) / n;
@@ -344,7 +344,7 @@ export interface ForecastModalProps {
   getRequeryData: (analyzeDays: number, datapointMinutes: number) => Promise<number[]>;
 }
 
-type ForecastMethod = "linear" | "holt-winters" | "triple-exp" | "prophet" | "arima" | "sarima";
+export type ForecastMethod = "linear" | "holt-winters" | "triple-exp" | "prophet" | "arima" | "sarima";
 
 const ANALYZE_OPTIONS = [7, 14, 30, 60, 90];
 const DATAPOINT_OPTIONS = [15, 30, 60, 720, 1440];

@@ -26,6 +26,9 @@ import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
 import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
 import { HotnessAssistButton, HotnessAssistPanel, analyzeHotnessTimelapse, HotnessAssistData } from "./components/HotnessAssist";
 import { ForecastModal } from "./components/ForecastModal";
+import { HotnessForecastPanel } from "./components/HotnessForecastPanel";
+import { PersonaPickerModal } from "./components/PersonaPickerModal";
+import type { PersonaDef } from "./components/PersonaPickerModal";
 import { CorrelationsPanel } from "./components/CorrelationsPanel";
 import { AIInsightsContext } from "./components/AIInsights";
 import appConfig from "../../app.config.json";
@@ -41,6 +44,31 @@ import { ActionBacklogTab } from "./tabs/ActionBacklogTab";
 import { OpportunityMatrixTab } from "./tabs/OpportunityMatrixTab";
 
 const APP_VERSION_LABEL = appConfig.app.version;
+
+const FO_PERSONAS: PersonaDef[] = [
+  { id: "all",       label: "All",            icon: "👥", description: "Full access — every tab enabled",           tabSummary: "All tabs are visible." },
+  { id: "developer", label: "Developer",       icon: "💻", description: "Performance, errors & technical detail",   tabSummary: "Performance Overview · Errors & Reliability · Navigation & Flows · Perf Budgets · Hyperlyzer · Action Backlog" },
+  { id: "sre",       label: "SRE",             icon: "🔧", description: "Reliability, performance & budgets",       tabSummary: "Performance Overview · Errors & Reliability · Perf Budgets · Opportunity Matrix · Action Backlog" },
+  { id: "manager",   label: "Manager",         icon: "📊", description: "KPIs, reliability & action tracking",     tabSummary: "Executive Summary · Performance Overview · Errors & Reliability · Opportunity Matrix · Action Backlog" },
+  { id: "executive", label: "Executive",       icon: "🏢", description: "High-level fleet health only",            tabSummary: "Executive Summary · Opportunity Matrix" },
+  { id: "product",   label: "Product Manager", icon: "🎯", description: "Journeys, opportunities & action items",  tabSummary: "Executive Summary · Navigation & Flows · Opportunity Matrix · Action Backlog" },
+  { id: "finops",    label: "FinOps",          icon: "💰", description: "Cost rankings, budgets & opportunities",  tabSummary: "Executive Summary · Cost & Ranking · Opportunity Matrix · Action Backlog" },
+];
+
+const FO_PERSONA_TABS: Record<string, Record<string, boolean>> = {
+  all:       Object.fromEntries(ALL_TABS.map(t => [t, true])) as Record<string, boolean>,
+  developer: { "Executive Summary": false, "Performance Overview": true, "Opportunity Matrix": false, "Errors & Reliability": true, "Navigation & Flows": true, "Cost & Ranking": false, "Perf Budgets": true, "Hyperlyzer": true, "Action Backlog": true },
+  sre:       { "Executive Summary": false, "Performance Overview": true, "Opportunity Matrix": true,  "Errors & Reliability": true, "Navigation & Flows": false, "Cost & Ranking": false, "Perf Budgets": true, "Hyperlyzer": false, "Action Backlog": true },
+  manager:   { "Executive Summary": true,  "Performance Overview": true, "Opportunity Matrix": true,  "Errors & Reliability": true, "Navigation & Flows": false, "Cost & Ranking": false, "Perf Budgets": false, "Hyperlyzer": false, "Action Backlog": true },
+  executive: { "Executive Summary": true,  "Performance Overview": false, "Opportunity Matrix": true, "Errors & Reliability": false, "Navigation & Flows": false, "Cost & Ranking": false, "Perf Budgets": false, "Hyperlyzer": false, "Action Backlog": false },
+  product:   { "Executive Summary": true,  "Performance Overview": false, "Opportunity Matrix": true, "Errors & Reliability": false, "Navigation & Flows": true,  "Cost & Ranking": false, "Perf Budgets": false, "Hyperlyzer": false, "Action Backlog": true },
+  finops:    { "Executive Summary": true,  "Performance Overview": false, "Opportunity Matrix": true, "Errors & Reliability": false, "Navigation & Flows": false, "Cost & Ranking": true,  "Perf Budgets": false, "Hyperlyzer": false, "Action Backlog": true },
+};
+
+const FO_WHATS_NEW = [
+  "📈 Predictive Hotness Forecasting — forecast future RUM stress with 6 AI-powered models",
+  "🎭 Persona Presets — role-based tab layouts; select your role to see only the tabs that matter to you",
+];
 
 // Hotness palette (matches user-journey-app)
 const TL_HOT_ELEV = "#FFF04D";
@@ -147,6 +175,69 @@ const AppHeader: React.FC<{
     document.addEventListener("mouseup", up);
   }, [hotnessAssistPos]);
   useEffect(() => { if (!tl.enabled) setHotnessAssistOpen(false); }, [tl.enabled]);
+
+  // Hotness Forecast panel state
+  const [hotnessForecastOpen, setHotnessForecastOpen] = useState(false);
+  const [hotnessForecastPos, setHotnessForecastPos] = useState<{ x: number; y: number }>({ x: 88, y: 240 });
+  const hotnessForecastDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const startHotnessForecastDrag = useCallback((e: React.MouseEvent) => {
+    hotnessForecastDragRef.current = { startX: e.clientX, startY: e.clientY, origX: hotnessForecastPos.x, origY: hotnessForecastPos.y };
+    const move = (me: MouseEvent) => {
+      if (!hotnessForecastDragRef.current) return;
+      setHotnessForecastPos({ x: hotnessForecastDragRef.current.origX + me.clientX - hotnessForecastDragRef.current.startX, y: hotnessForecastDragRef.current.origY + me.clientY - hotnessForecastDragRef.current.startY });
+    };
+    const up = () => { hotnessForecastDragRef.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }, [hotnessForecastPos]);
+  useEffect(() => { if (!tl.enabled) setHotnessForecastOpen(false); }, [tl.enabled]);
+
+  const getHotnessForecastData = useCallback(async (days: number): Promise<number[]> => {
+    try {
+      const filt = webAppFilter?.selected && webAppFilter.selected.length > 0
+        ? `\n| filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
+        : "";
+      const q = `fetch user.events, from: now()-${days}d
+| filter isNotNull(frontend.name)${filt}
+| fieldsAdd dur_ms = toDouble(duration) / 1000000.0, day = bin(start_time, 1d)
+| summarize
+    total = count(),
+    errors = countIf(characteristics.has_error == true),
+    avgDur = avg(dur_ms),
+    sat = countIf(dur_ms <= 3000.0),
+    tol = countIf(dur_ms > 3000.0 and dur_ms <= 12000.0),
+    by: {day}
+| sort day asc`;
+      const start = await queryExecutionClient.queryExecute({ body: { query: q, requestTimeoutMilliseconds: 60000, maxResultRecords: 10000 } });
+      let recs: any[] = [];
+      if (start.state === "SUCCEEDED") { recs = (start.result?.records ?? []) as any[]; }
+      else {
+        const token = start.requestToken;
+        if (token) {
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const poll = await queryExecutionClient.queryPoll({ requestToken: token });
+            if (poll.state === "SUCCEEDED") { recs = (poll.result?.records ?? []) as any[]; break; }
+            if (poll.state === "FAILED" || poll.state === "CANCELLED") break;
+          }
+        }
+      }
+      if (recs.length < 2) return [];
+      const errRates = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? Number(r.errors ?? 0) / t * 100 : 0; });
+      const durs    = recs.map((r: any) => Number(r.avgDur ?? 0));
+      const apdexes = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? (Number(r.sat ?? 0) + Number(r.tol ?? 0) / 2) / t : 1; });
+      const mn = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(a.length, 1);
+      const sd = (a: number[], m: number) => Math.sqrt(a.reduce((x, v) => x + (v - m) ** 2, 0) / Math.max(a.length, 1)) || 1;
+      const eM = mn(errRates), eS = sd(errRates, eM);
+      const dM = mn(durs),     dS = sd(durs, dM);
+      const aM = mn(apdexes),  aS = sd(apdexes, aM);
+      return recs.map((_: any, i: number) => Math.max(0,
+        (errRates[i] - eM) / eS,
+        (durs[i] - dM) / dS,
+        (aM - apdexes[i]) / aS,
+      ));
+    } catch { return []; }
+  }, [webAppFilter]);
 
   // Hotness diagnosis panel — draggable, portaled to body.
   const [tlDiagPanel, setTlDiagPanel] = useState<{ pos: { x: number; y: number } } | null>(null);
@@ -401,6 +492,19 @@ const AppHeader: React.FC<{
                     {hotnessAssistData && (
                       <HotnessAssistButton active={hotnessAssistOpen} onClick={() => setHotnessAssistOpen(v => !v)} />
                     )}
+                    {tl.hotness.length > 0 && (
+                      <button
+                        onClick={() => setHotnessForecastOpen(v => !v)}
+                        title="Hotness Forecast"
+                        style={{
+                          fontSize: 11, padding: "2px 8px", borderRadius: 5, cursor: "pointer",
+                          background: hotnessForecastOpen ? "rgba(69,137,255,0.25)" : "rgba(255,255,255,0.07)",
+                          color: hotnessForecastOpen ? "#4589FF" : "rgba(255,255,255,0.6)",
+                          border: `1px solid ${hotnessForecastOpen ? "rgba(69,137,255,0.5)" : "rgba(255,255,255,0.15)"}`,
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                        }}
+                      >📈 Forecast</button>
+                    )}
                   </Flex>
                   <Flex alignItems="center" gap={8}>
                     <span style={{ fontSize: 10, opacity: 0.55 }}><span style={{ display: "inline-block", width: 8, height: 8, background: "#4589FF", borderRadius: 2, marginRight: 4, verticalAlign: "middle" }} />Normal</span>
@@ -517,6 +621,17 @@ const AppHeader: React.FC<{
           onDragStart={startHotnessAssistDrag}
         />
       )}
+
+      {hotnessForecastOpen && tl.hotness.length > 0 && (
+        <HotnessForecastPanel
+          hotness={tl.hotness}
+          bucketMs={tl.bucketMs}
+          pos={hotnessForecastPos}
+          onClose={() => setHotnessForecastOpen(false)}
+          onDragStart={startHotnessForecastDrag}
+          getRequeryData={getHotnessForecastData}
+        />
+      )}
     </div>
   );
 };
@@ -572,7 +687,7 @@ const HelpSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, o
 // Settings panel — tab visibility toggles + perf budgets
 // ---------------------------------------------------------------------------
 const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ show, onDismiss }) => {
-  const { tabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets, gradeWeights, setGradeWeights, subTabVisibility, toggleSubTab, industry, setIndustry } = useSettings();
+  const { tabVisibility, setTabVisibility, toggleTab, resetTabVisibility, budgets, setBudgets, gradeWeights, setGradeWeights, subTabVisibility, toggleSubTab, industry, setIndustry } = useSettings();
   const visibleCount = ALL_TABS.filter(t => tabVisibility[t] !== false).length;
 
   return (
@@ -580,6 +695,31 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
       <div style={{ padding: "4px 0" }}>
         <div style={{ marginBottom: 12, padding: "8px 12px", background: "rgba(128,128,128,0.06)", borderRadius: 6, border: "1px solid rgba(128,128,128,0.15)" }}>
           <Text style={{ fontSize: 12, opacity: 0.75 }}>These preferences are saved per-user and apply only to you.</Text>
+        </div>
+
+        {/* Role Presets */}
+        <div style={{ marginBottom: 14, border: "1px solid rgba(69,137,255,0.2)", borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ padding: "10px 12px", background: "rgba(69,137,255,0.06)", borderBottom: "1px solid rgba(69,137,255,0.18)" }}>
+            <Strong style={{ fontSize: 13 }}>Role Preset</Strong>
+            <Text style={{ fontSize: 11, opacity: 0.65, display: "block", marginTop: 2 }}>Apply a preset to show only the tabs relevant to your role. You can still adjust individually below.</Text>
+          </div>
+          <div style={{ padding: "10px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {FO_PERSONAS.map(p => (
+              <button
+                key={p.id}
+                title={p.tabSummary}
+                onClick={() => setTabVisibility(FO_PERSONA_TABS[p.id] ?? FO_PERSONA_TABS["all"])}
+                style={{
+                  fontSize: 12, padding: "5px 12px", borderRadius: 20, cursor: "pointer",
+                  background: "rgba(69,137,255,0.1)", color: "#a8c4ff",
+                  border: "1px solid rgba(69,137,255,0.3)",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                }}
+              >
+                <span>{p.icon}</span> {p.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Tab visibility */}
@@ -762,7 +902,7 @@ const SettingsSheet: React.FC<{ show: boolean; onDismiss: () => void }> = ({ sho
 // Main shell
 // ---------------------------------------------------------------------------
 const AppInner: React.FC = () => {
-  const { tabVisibility, timeframeDays, setTimeframeDays, webAppFilter, refreshIntervalMs } = useSettings();
+  const { tabVisibility, setTabVisibility, timeframeDays, setTimeframeDays, webAppFilter, refreshIntervalMs } = useSettings();
   const [tab, setTab] = useState<number>(0);
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -994,6 +1134,21 @@ const AppInner: React.FC = () => {
           onClose={() => setCorrelationsTarget(null)}
         />
       )}
+
+      <PersonaPickerModal
+        appName="Frontend Overview"
+        appVersion={APP_VERSION_LABEL}
+        appDesc="RUM-powered insights into web app performance, errors, navigation flows, and user engagement across your entire frontend fleet."
+        repoUrl="https://github.com/TechShady/frontend-overview"
+        whatsNew={FO_WHATS_NEW}
+        statePrefix="fo"
+        personas={FO_PERSONAS}
+        defaultPersonaId="all"
+        onApply={(personaId) => {
+          const vis = FO_PERSONA_TABS[personaId] ?? FO_PERSONA_TABS["all"];
+          setTabVisibility(vis);
+        }}
+      />
 
       {forecastModal && (
         <ForecastModal
