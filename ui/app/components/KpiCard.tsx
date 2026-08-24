@@ -270,9 +270,15 @@ export function KpiCard({
   const THRESHOLD_COLORS = new Set([GREEN, RED, YELLOW]);
   const showProgressBar = hasSpark && !customContent && rawValue != null && THRESHOLD_COLORS.has(color ?? "");
   let progressPct = 50;
-  if (showProgressBar) {
-    if (color === GREEN) progressPct = effectiveHigherIsBetter ? 85 : 15;
-    else if (color === RED) progressPct = effectiveHigherIsBetter ? 15 : 85;
+  if (showProgressBar && sparkline && sparkline.length >= 2) {
+    const sorted = [...sparkline].sort((a, b) => a - b);
+    const rank = sorted.filter(v => v <= (rawValue as number)).length;
+    const quantile = rank / sorted.length;
+    let zoneMin: number, zoneMax: number;
+    if (color === GREEN)       { zoneMin = effectiveHigherIsBetter ? 67 : 2;  zoneMax = effectiveHigherIsBetter ? 98 : 33; }
+    else if (color === RED)    { zoneMin = effectiveHigherIsBetter ? 2  : 67; zoneMax = effectiveHigherIsBetter ? 33 : 98; }
+    else                       { zoneMin = 33; zoneMax = 67; }
+    progressPct = zoneMin + quantile * (zoneMax - zoneMin);
   }
 
   const doForecast = () => {
