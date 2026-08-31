@@ -1,4 +1,3 @@
 ﻿[
-  { "url": "https://guu84124.apps.dynatrace.com", "label": "primary" },
-  { "url": "https://rer30726.apps.dynatrace.com", "label": "tenant-2" }
+  { "url": "https://guu84124.apps.dynatrace.com", "label": "primary" }
 ]
