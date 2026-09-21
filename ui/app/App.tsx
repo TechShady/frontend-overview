@@ -27,6 +27,7 @@ import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEnt
 import { HotnessAssistButton, HotnessAssistPanel, analyzeHotnessTimelapse, HotnessAssistData } from "./components/HotnessAssist";
 import { ForecastModal } from "./components/ForecastModal";
 import { HotnessForecastPanel } from "./components/HotnessForecastPanel";
+import { HotnessCalendarPanel } from "./components/HotnessCalendarPanel";
 import { PersonaPickerModal } from "./components/PersonaPickerModal";
 import type { PersonaDef } from "./components/PersonaPickerModal";
 import { CorrelationsPanel } from "./components/CorrelationsPanel";
@@ -191,6 +192,69 @@ const AppHeader: React.FC<{
     document.addEventListener("mouseup", up);
   }, [hotnessForecastPos]);
   useEffect(() => { if (!tl.enabled) setHotnessForecastOpen(false); }, [tl.enabled]);
+
+  // Heatmap panel state
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarPos, setCalendarPos] = useState<{ x: number; y: number }>({ x: 128, y: 280 });
+  const calendarDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const startCalendarDrag = useCallback((e: React.MouseEvent) => {
+    calendarDragRef.current = { startX: e.clientX, startY: e.clientY, origX: calendarPos.x, origY: calendarPos.y };
+    const move = (me: MouseEvent) => {
+      if (!calendarDragRef.current) return;
+      setCalendarPos({ x: calendarDragRef.current.origX + me.clientX - calendarDragRef.current.startX, y: calendarDragRef.current.origY + me.clientY - calendarDragRef.current.startY });
+    };
+    const up = () => { calendarDragRef.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }, [calendarPos]);
+  useEffect(() => { if (!tl.enabled) setCalendarOpen(false); }, [tl.enabled]);
+
+  const getHeatmapData = useCallback(async (days: number): Promise<number[]> => {
+    try {
+      const filt = webAppFilter?.selected && webAppFilter.selected.length > 0
+        ? `\n| filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
+        : "";
+      const q = `fetch user.events, from: now()-${days}d
+| filter isNotNull(frontend.name)${filt}
+| fieldsAdd dur_ms = toDouble(duration) / 1000000.0, hour = bin(start_time, 1h)
+| summarize
+    total = count(),
+    errors = countIf(characteristics.has_error == true),
+    avgDur = avg(dur_ms),
+    sat = countIf(dur_ms <= 3000.0),
+    tol = countIf(dur_ms > 3000.0 and dur_ms <= 12000.0),
+    by: {hour}
+| sort hour asc`;
+      const start = await queryExecutionClient.queryExecute({ body: { query: q, requestTimeoutMilliseconds: 60000, maxResultRecords: 50000 } });
+      let recs: any[] = [];
+      if (start.state === "SUCCEEDED") { recs = (start.result?.records ?? []) as any[]; }
+      else {
+        const token = start.requestToken;
+        if (token) {
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const poll = await queryExecutionClient.queryPoll({ requestToken: token });
+            if (poll.state === "SUCCEEDED") { recs = (poll.result?.records ?? []) as any[]; break; }
+            if (poll.state === "FAILED" || poll.state === "CANCELLED") break;
+          }
+        }
+      }
+      if (recs.length < 2) return [];
+      const errRates = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? Number(r.errors ?? 0) / t * 100 : 0; });
+      const durs    = recs.map((r: any) => Number(r.avgDur ?? 0));
+      const apdexes = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? (Number(r.sat ?? 0) + Number(r.tol ?? 0) / 2) / t : 1; });
+      const mn = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(a.length, 1);
+      const sd = (a: number[], m: number) => Math.sqrt(a.reduce((x, v) => x + (v - m) ** 2, 0) / Math.max(a.length, 1)) || 1;
+      const eM = mn(errRates), eS = sd(errRates, eM);
+      const dM = mn(durs),     dS = sd(durs, dM);
+      const aM = mn(apdexes),  aS = sd(apdexes, aM);
+      return recs.map((_: any, i: number) => Math.max(0,
+        (errRates[i] - eM) / eS,
+        (durs[i] - dM) / dS,
+        (aM - apdexes[i]) / aS,
+      ));
+    } catch { return []; }
+  }, [webAppFilter]);
 
   const getHotnessForecastData = useCallback(async (days: number): Promise<number[]> => {
     try {
@@ -494,6 +558,19 @@ const AppHeader: React.FC<{
                     )}
                     {tl.hotness.length > 0 && (
                       <button
+                        onClick={() => setCalendarOpen(v => !v)}
+                        title="Hotness Heatmap"
+                        style={{
+                          fontSize: 11, padding: "2px 8px", borderRadius: 5, cursor: "pointer",
+                          background: calendarOpen ? "rgba(69,137,255,0.25)" : "rgba(255,255,255,0.07)",
+                          color: calendarOpen ? "#4589FF" : "rgba(255,255,255,0.6)",
+                          border: `1px solid ${calendarOpen ? "rgba(69,137,255,0.5)" : "rgba(255,255,255,0.15)"}`,
+                          display: "inline-flex", alignItems: "center", gap: 4,
+                        }}
+                      >📅 Heatmap</button>
+                    )}
+                    {tl.hotness.length > 0 && (
+                      <button
                         onClick={() => setHotnessForecastOpen(v => !v)}
                         title="Hotness Forecast"
                         style={{
@@ -630,6 +707,17 @@ const AppHeader: React.FC<{
           onClose={() => setHotnessForecastOpen(false)}
           onDragStart={startHotnessForecastDrag}
           getRequeryData={getHotnessForecastData}
+        />
+      )}
+
+      {calendarOpen && tl.hotness.length > 0 && (
+        <HotnessCalendarPanel
+          heatScores={tl.hotness}
+          bucketMs={3600000}
+          pos={calendarPos}
+          onClose={() => setCalendarOpen(false)}
+          onDragStart={startCalendarDrag}
+          getRequeryData={getHeatmapData}
         />
       )}
     </div>
