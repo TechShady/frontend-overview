@@ -501,10 +501,15 @@ export function HotnessAssistPanel({
     }).join("");
     const threshLines = [{ z: 0.75, c: "#FFF04D" }, { z: 1.5, c: "#FF3D9A" }, { z: 2.5, c: "#FF073A" }]
       .map(({ z, c }) => `<line x1="0" y1="${130 - (z / rMaxZ) * 106}" x2="${svgW}" y2="${130 - (z / rMaxZ) * 106}" stroke="${c}" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.4"/>`).join("");
-    const wMark  = `<line x1="${data.worstIdx * 6 + 3}" y1="24" x2="${data.worstIdx * 6 + 3}" y2="130" stroke="#FF073A" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.worstIdx * 6 + 1, svgW - 16)}" y="14" font-size="9" fill="#FF073A" font-weight="bold">W1</text>`;
-    const w2Mark = data.worst2Idx !== data.worstIdx ? `<line x1="${data.worst2Idx * 6 + 3}" y1="24" x2="${data.worst2Idx * 6 + 3}" y2="130" stroke="#FF8FAB" stroke-width="1" stroke-dasharray="3,2" opacity="0.65"/><text x="${Math.min(data.worst2Idx * 6 + 1, svgW - 16)}" y="14" font-size="9" fill="#FF8FAB" font-weight="bold">W2</text>` : "";
-    const bMark  = data.bestIdx !== data.worstIdx ? `<line x1="${data.bestIdx * 6 + 3}" y1="24" x2="${data.bestIdx * 6 + 3}" y2="130" stroke="#0D9C29" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.75"/><text x="${Math.min(data.bestIdx * 6 + 1, svgW - 16)}" y="14" font-size="9" fill="#0D9C29" font-weight="bold">B1</text>` : "";
-    const b2Mark = data.best2Idx !== data.bestIdx ? `<line x1="${data.best2Idx * 6 + 3}" y1="24" x2="${data.best2Idx * 6 + 3}" y2="130" stroke="#6EE7A0" stroke-width="1" stroke-dasharray="3,2" opacity="0.65"/><text x="${Math.min(data.best2Idx * 6 + 1, svgW - 16)}" y="14" font-size="9" fill="#6EE7A0" font-weight="bold">B2</text>` : "";
+    const mkMark = (idx: number, color: string, label: string, sw: number, op: number, row: "top" | "bot") => {
+      const cx = Math.min(idx * 6 + 3, svgW - 10);
+      const ry = row === "top" ? 1 : 15; const ty = row === "top" ? 11 : 25;
+      return `<line x1="${idx * 6 + 3}" y1="28" x2="${idx * 6 + 3}" y2="130" stroke="${color}" stroke-width="${sw}" stroke-dasharray="3,2" opacity="${op}"/><rect x="${cx - 9}" y="${ry}" width="18" height="13" rx="2" fill="rgba(15,20,40,0.88)"/><text x="${cx}" y="${ty}" font-size="8" fill="${color}" font-weight="700" font-family="'Segoe UI',system-ui,sans-serif" text-anchor="middle">${label}</text>`;
+    };
+    const wMark  = mkMark(data.worstIdx,  "#FF073A", "W1", 1.5, 0.75, "top");
+    const w2Mark = data.worst2Idx !== data.worstIdx ? mkMark(data.worst2Idx, "#FF8FAB", "W2", 1, 0.65, "top") : "";
+    const bMark  = data.bestIdx  !== data.worstIdx  ? mkMark(data.bestIdx,   "#0D9C29", "B1", 1.5, 0.75, "bot") : "";
+    const b2Mark = data.best2Idx !== data.bestIdx   ? mkMark(data.best2Idx,  "#6EE7A0", "B2", 1, 0.65, "bot") : "";
     const mkMetricRows = (row: SharedBucketMetrics, score: number, color: string) => [
       { l: "Sessions",   v: fmtCount(row.sessions) },
       { l: "Error Rate", v: fmtPct(row.errorRate) },
@@ -624,24 +629,30 @@ ${insightsHtml}
                 const isMarked = i === data.worstIdx || i === data.worst2Idx || i === data.bestIdx || i === data.best2Idx;
                 return <rect key={i} x={i * 6 + 0.5} y={130 - h} width={5} height={h} fill={color} opacity={isMarked ? 1 : 0.65} rx={0.5} />;
               })}
-              {/* W1 marker */}
-              <line x1={data.worstIdx * 6 + 3} y1={24} x2={data.worstIdx * 6 + 3} y2={130} stroke={TL_HOT_HIGH} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-              <text x={Math.min(data.worstIdx * 6 + 1, data.allHotness.length * 6 - 16)} y={14} fontSize={9} fill={TL_HOT_HIGH} opacity={0.9} fontWeight="700">W1</text>
-              {/* W2 marker — only when different */}
-              {data.worst2Idx !== data.worstIdx && <>
-                <line x1={data.worst2Idx * 6 + 3} y1={24} x2={data.worst2Idx * 6 + 3} y2={130} stroke="#FF8FAB" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
-                <text x={Math.min(data.worst2Idx * 6 + 1, data.allHotness.length * 6 - 16)} y={14} fontSize={9} fill="#FF8FAB" opacity={0.9} fontWeight="700">W2</text>
-              </>}
-              {/* B1 marker */}
-              {data.bestIdx !== data.worstIdx && <>
-                <line x1={data.bestIdx * 6 + 3} y1={24} x2={data.bestIdx * 6 + 3} y2={130} stroke={GREEN} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-                <text x={Math.min(data.bestIdx * 6 + 1, data.allHotness.length * 6 - 16)} y={14} fontSize={9} fill={GREEN} opacity={0.9} fontWeight="700">B1</text>
-              </>}
-              {/* B2 marker — only when different */}
-              {data.best2Idx !== data.bestIdx && data.best2Idx !== data.worstIdx && <>
-                <line x1={data.best2Idx * 6 + 3} y1={24} x2={data.best2Idx * 6 + 3} y2={130} stroke="#6EE7A0" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
-                <text x={Math.min(data.best2Idx * 6 + 1, data.allHotness.length * 6 - 16)} y={14} fontSize={9} fill="#6EE7A0" opacity={0.9} fontWeight="700">B2</text>
-              </>}
+              {/* W1 marker — top label row */}
+              {(() => { const cx = Math.min(data.worstIdx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
+                <line x1={data.worstIdx * 6 + 3} y1={28} x2={data.worstIdx * 6 + 3} y2={130} stroke={TL_HOT_HIGH} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
+                <rect x={cx - 9} y={1} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
+                <text x={cx} y={11} fontSize={8} fill={TL_HOT_HIGH} fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>W1</text>
+              </>); })()}
+              {/* W2 marker — top label row, only when different */}
+              {data.worst2Idx !== data.worstIdx && (() => { const cx = Math.min(data.worst2Idx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
+                <line x1={data.worst2Idx * 6 + 3} y1={28} x2={data.worst2Idx * 6 + 3} y2={130} stroke="#FF8FAB" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
+                <rect x={cx - 9} y={1} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
+                <text x={cx} y={11} fontSize={8} fill="#FF8FAB" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>W2</text>
+              </>); })()}
+              {/* B1 marker — bottom label row */}
+              {data.bestIdx !== data.worstIdx && (() => { const cx = Math.min(data.bestIdx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
+                <line x1={data.bestIdx * 6 + 3} y1={28} x2={data.bestIdx * 6 + 3} y2={130} stroke={GREEN} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
+                <rect x={cx - 9} y={15} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
+                <text x={cx} y={25} fontSize={8} fill={GREEN} fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>B1</text>
+              </>); })()}
+              {/* B2 marker — bottom label row, only when different */}
+              {data.best2Idx !== data.bestIdx && data.best2Idx !== data.worstIdx && (() => { const cx = Math.min(data.best2Idx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
+                <line x1={data.best2Idx * 6 + 3} y1={28} x2={data.best2Idx * 6 + 3} y2={130} stroke="#6EE7A0" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
+                <rect x={cx - 9} y={15} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
+                <text x={cx} y={25} fontSize={8} fill="#6EE7A0" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>B2</text>
+              </>); })()}
             </svg>
             <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 9, opacity: 0.4 }}>
               <span><span style={{ display: "inline-block", width: 7, height: 7, background: TL_HOT_ELEV, borderRadius: 1, verticalAlign: "middle", marginRight: 3 }} />Elevated (Z≥0.75)</span>
