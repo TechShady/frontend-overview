@@ -490,26 +490,52 @@ export function HotnessAssistPanel({
     data.burstType === "sustained" ? `Sustained (${data.maxConsecutiveHot} consecutive)` :
     data.burstType === "transient" ? `Transient (${data.maxConsecutiveHot} consecutive)` : "Stable";
 
+  // Greedy row assignment for chart labels — prevents overlap regardless of bucket proximity
+  const chartW = Math.max(data.allHotness.length * 6, 120);
+  const rawLabels = [
+    { idx: data.worstIdx,  label: "W1", color: TL_HOT_HIGH, lineW: 1.5, lineOp: 0.75 },
+    ...(data.worst2Idx !== data.worstIdx ? [{ idx: data.worst2Idx, label: "W2", color: "#FF8FAB",  lineW: 1,   lineOp: 0.65 }] : []),
+    ...(data.bestIdx  !== data.worstIdx  ? [{ idx: data.bestIdx,   label: "B1", color: GREEN,       lineW: 1.5, lineOp: 0.75 }] : []),
+    ...(data.best2Idx !== data.bestIdx && data.best2Idx !== data.worstIdx ? [{ idx: data.best2Idx, label: "B2", color: "#6EE7A0", lineW: 1, lineOp: 0.65 }] : []),
+  ].map(l => ({ ...l, cx: Math.min(l.idx * 6 + 3, chartW - 10) }));
+  const rowMaxX: number[] = [];
+  const labelRow = new Map<string, number>();
+  [...rawLabels].sort((a, b) => a.cx - b.cx).forEach(lbl => {
+    let r = 0; while (r < rowMaxX.length && lbl.cx - rowMaxX[r] < 20) r++;
+    labelRow.set(lbl.label, r); rowMaxX[r] = lbl.cx;
+  });
+  const labelRowH  = 14;
+  const linesStartY = rowMaxX.length * labelRowH + 2;
+  const chartBarH  = 130 - linesStartY;
+
   const generateReportHtml = (): string => {
     const ts = new Date().toLocaleString();
     const rMaxZ = Math.max(0.5, ...data.allHotness);
     const svgW  = Math.max(data.allHotness.length * 6, 120);
+    const rSpecs = [
+      { idx: data.worstIdx,  label: "W1", color: "#FF073A", lineW: 1.5, lineOp: 0.75 },
+      ...(data.worst2Idx !== data.worstIdx ? [{ idx: data.worst2Idx, label: "W2", color: "#FF8FAB", lineW: 1,   lineOp: 0.65 }] : []),
+      ...(data.bestIdx  !== data.worstIdx  ? [{ idx: data.bestIdx,   label: "B1", color: "#0D9C29", lineW: 1.5, lineOp: 0.75 }] : []),
+      ...(data.best2Idx !== data.bestIdx   ? [{ idx: data.best2Idx,  label: "B2", color: "#6EE7A0", lineW: 1,   lineOp: 0.65 }] : []),
+    ].map(l => ({ ...l, cx: Math.min(l.idx * 6 + 3, svgW - 10) }));
+    const rRowMaxX: number[] = []; const rLabelRow = new Map<string, number>();
+    [...rSpecs].sort((a, b) => a.cx - b.cx).forEach(lbl => {
+      let r = 0; while (r < rRowMaxX.length && lbl.cx - rRowMaxX[r] < 20) r++;
+      rLabelRow.set(lbl.label, r); rRowMaxX[r] = lbl.cx;
+    });
+    const rLabelRowH = 14; const rLinesY = rRowMaxX.length * rLabelRowH + 2; const rBarH = 130 - rLinesY;
+    const rMarkedIdxs = new Set(rSpecs.map(l => l.idx));
     const bars  = data.allHotness.map((v, i) => {
-      const h = Math.max(2, (v / rMaxZ) * 106);
+      const h = Math.max(2, (v / rMaxZ) * rBarH);
       const c = v >= 2.5 ? "#FF073A" : v >= 1.5 ? "#FF3D9A" : v >= 0.75 ? "#FFF04D" : "#4589FF";
-      return `<rect x="${i * 6 + 0.5}" y="${130 - h}" width="5" height="${h}" fill="${c}" opacity="${i === data.worstIdx || i === data.bestIdx ? 1 : 0.65}" rx="0.5"/>`;
+      return `<rect x="${i * 6 + 0.5}" y="${130 - h}" width="5" height="${h}" fill="${c}" opacity="${rMarkedIdxs.has(i) ? 1 : 0.65}" rx="0.5"/>`;
     }).join("");
     const threshLines = [{ z: 0.75, c: "#FFF04D" }, { z: 1.5, c: "#FF3D9A" }, { z: 2.5, c: "#FF073A" }]
-      .map(({ z, c }) => `<line x1="0" y1="${130 - (z / rMaxZ) * 106}" x2="${svgW}" y2="${130 - (z / rMaxZ) * 106}" stroke="${c}" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.4"/>`).join("");
-    const mkMark = (idx: number, color: string, label: string, sw: number, op: number, row: "top" | "bot") => {
-      const cx = Math.min(idx * 6 + 3, svgW - 10);
-      const ry = row === "top" ? 1 : 15; const ty = row === "top" ? 11 : 25;
-      return `<line x1="${idx * 6 + 3}" y1="28" x2="${idx * 6 + 3}" y2="130" stroke="${color}" stroke-width="${sw}" stroke-dasharray="3,2" opacity="${op}"/><rect x="${cx - 9}" y="${ry}" width="18" height="13" rx="2" fill="rgba(15,20,40,0.88)"/><text x="${cx}" y="${ty}" font-size="8" fill="${color}" font-weight="700" font-family="'Segoe UI',system-ui,sans-serif" text-anchor="middle">${label}</text>`;
-    };
-    const wMark  = mkMark(data.worstIdx,  "#FF073A", "W1", 1.5, 0.75, "top");
-    const w2Mark = data.worst2Idx !== data.worstIdx ? mkMark(data.worst2Idx, "#FF8FAB", "W2", 1, 0.65, "top") : "";
-    const bMark  = data.bestIdx  !== data.worstIdx  ? mkMark(data.bestIdx,   "#0D9C29", "B1", 1.5, 0.75, "bot") : "";
-    const b2Mark = data.best2Idx !== data.bestIdx   ? mkMark(data.best2Idx,  "#6EE7A0", "B2", 1, 0.65, "bot") : "";
+      .map(({ z, c }) => `<line x1="0" y1="${130 - (z / rMaxZ) * rBarH}" x2="${svgW}" y2="${130 - (z / rMaxZ) * rBarH}" stroke="${c}" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.4"/>`).join("");
+    const markers = rSpecs.map(({ idx, label, color, lineW, lineOp, cx }) => {
+      const row = rLabelRow.get(label) ?? 0;
+      return `<line x1="${idx * 6 + 3}" y1="${rLinesY}" x2="${idx * 6 + 3}" y2="130" stroke="${color}" stroke-width="${lineW}" stroke-dasharray="3,2" opacity="${lineOp}"/><rect x="${cx - 9}" y="${row * rLabelRowH + 1}" width="18" height="13" rx="2" fill="rgba(15,20,40,0.88)"/><text x="${cx}" y="${row * rLabelRowH + 11}" font-size="8" fill="${color}" font-weight="700" font-family="'Segoe UI',system-ui,sans-serif" text-anchor="middle">${label}</text>`;
+    }).join("");
     const mkMetricRows = (row: SharedBucketMetrics, score: number, color: string) => [
       { l: "Sessions",   v: fmtCount(row.sessions) },
       { l: "Error Rate", v: fmtPct(row.errorRate) },
@@ -550,7 +576,7 @@ export function HotnessAssistPanel({
 </div>
 <h2>Hotness Timeline</h2>
 <div style="background:rgba(128,128,128,0.04);border:1px solid rgba(128,128,128,0.15);border-radius:8px;padding:8px 10px 6px;margin-bottom:20px">
-  <svg width="100%" height="130" viewBox="0 0 ${svgW} 130" preserveAspectRatio="none" style="display:block">${threshLines}${bars}${wMark}${w2Mark}${bMark}${b2Mark}</svg>
+  <svg width="100%" height="130" viewBox="0 0 ${svgW} 130" preserveAspectRatio="none" style="display:block">${threshLines}${bars}${markers}</svg>
 </div>
 <h2>W1 vs B1</h2>
 <div class="card-grid">
@@ -619,40 +645,26 @@ ${insightsHtml}
         <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${chartDelay}ms` }}>
           <div className="uj-ai-section-title">Hotness Timeline — Full Period</div>
           <div style={{ background: "rgba(128,128,128,0.04)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, padding: "8px 10px 6px" }}>
-            <svg width="100%" height="130" viewBox={`0 0 ${Math.max(data.allHotness.length * 6, 120)} 130`} preserveAspectRatio="none" style={{ display: "block" }}>
+            <svg width="100%" height="130" viewBox={`0 0 ${chartW} 130`} preserveAspectRatio="none" style={{ display: "block" }}>
               {[{ z: 0.75, color: TL_HOT_ELEV }, { z: 1.5, color: TL_HOT_WARM }, { z: 2.5, color: TL_HOT_HIGH }].map(({ z, color }) => (
-                <line key={z} x1={0} y1={130 - (z / maxZ) * 106} x2={data.allHotness.length * 6} y2={130 - (z / maxZ) * 106} stroke={color} strokeWidth={0.5} strokeDasharray="3,2" opacity={0.4} />
+                <line key={z} x1={0} y1={130 - (z / maxZ) * chartBarH} x2={chartW} y2={130 - (z / maxZ) * chartBarH} stroke={color} strokeWidth={0.5} strokeDasharray="3,2" opacity={0.4} />
               ))}
               {data.allHotness.map((v, i) => {
-                const h = Math.max(2, (v / maxZ) * 106);
+                const h = Math.max(2, (v / maxZ) * chartBarH);
                 const color = v >= 2.5 ? TL_HOT_HIGH : v >= 1.5 ? TL_HOT_WARM : v >= 0.75 ? TL_HOT_ELEV : "#4589FF";
-                const isMarked = i === data.worstIdx || i === data.worst2Idx || i === data.bestIdx || i === data.best2Idx;
+                const isMarked = rawLabels.some(l => l.idx === i);
                 return <rect key={i} x={i * 6 + 0.5} y={130 - h} width={5} height={h} fill={color} opacity={isMarked ? 1 : 0.65} rx={0.5} />;
               })}
-              {/* W1 marker — top label row */}
-              {(() => { const cx = Math.min(data.worstIdx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
-                <line x1={data.worstIdx * 6 + 3} y1={28} x2={data.worstIdx * 6 + 3} y2={130} stroke={TL_HOT_HIGH} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-                <rect x={cx - 9} y={1} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
-                <text x={cx} y={11} fontSize={8} fill={TL_HOT_HIGH} fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>W1</text>
-              </>); })()}
-              {/* W2 marker — top label row, only when different */}
-              {data.worst2Idx !== data.worstIdx && (() => { const cx = Math.min(data.worst2Idx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
-                <line x1={data.worst2Idx * 6 + 3} y1={28} x2={data.worst2Idx * 6 + 3} y2={130} stroke="#FF8FAB" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
-                <rect x={cx - 9} y={1} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
-                <text x={cx} y={11} fontSize={8} fill="#FF8FAB" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>W2</text>
-              </>); })()}
-              {/* B1 marker — bottom label row */}
-              {data.bestIdx !== data.worstIdx && (() => { const cx = Math.min(data.bestIdx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
-                <line x1={data.bestIdx * 6 + 3} y1={28} x2={data.bestIdx * 6 + 3} y2={130} stroke={GREEN} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.75} />
-                <rect x={cx - 9} y={15} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
-                <text x={cx} y={25} fontSize={8} fill={GREEN} fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>B1</text>
-              </>); })()}
-              {/* B2 marker — bottom label row, only when different */}
-              {data.best2Idx !== data.bestIdx && data.best2Idx !== data.worstIdx && (() => { const cx = Math.min(data.best2Idx * 6 + 3, data.allHotness.length * 6 - 10); return (<>
-                <line x1={data.best2Idx * 6 + 3} y1={28} x2={data.best2Idx * 6 + 3} y2={130} stroke="#6EE7A0" strokeWidth={1} strokeDasharray="3,2" opacity={0.65} />
-                <rect x={cx - 9} y={15} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
-                <text x={cx} y={25} fontSize={8} fill="#6EE7A0" fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>B2</text>
-              </>); })()}
+              {rawLabels.map(({ idx, label, color, lineW, lineOp, cx }) => {
+                const row = labelRow.get(label) ?? 0;
+                return (
+                  <React.Fragment key={label}>
+                    <line x1={idx * 6 + 3} y1={linesStartY} x2={idx * 6 + 3} y2={130} stroke={color} strokeWidth={lineW} strokeDasharray="3,2" opacity={lineOp} />
+                    <rect x={cx - 9} y={row * labelRowH + 1} width={18} height={13} rx={2} fill="rgba(15,20,40,0.88)" />
+                    <text x={cx} y={row * labelRowH + 11} fontSize={8} fill={color} fontWeight="700" fontFamily="'Segoe UI',system-ui,sans-serif" textAnchor="middle" opacity={0.95}>{label}</text>
+                  </React.Fragment>
+                );
+              })}
             </svg>
             <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 9, opacity: 0.4 }}>
               <span><span style={{ display: "inline-block", width: 7, height: 7, background: TL_HOT_ELEV, borderRadius: 1, verticalAlign: "middle", marginRight: 3 }} />Elevated (Z≥0.75)</span>
