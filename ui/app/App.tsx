@@ -18,6 +18,7 @@ import {
   DEFAULT_GRADE_WEIGHTS,
   INDUSTRY_NAMES,
   setQueryAnchorMs, getQueryAnchorMs,
+  periodClause,
 } from "./SettingsContext";
 import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, SharedBucketMetrics } from "./TimelapseContext";
 import { DisclaimerModal } from "./components/DisclaimerModal";
@@ -136,6 +137,7 @@ const AppHeader: React.FC<{
   const {
     webAppFilter, setWebAppFilter,
     refreshIntervalMs, setRefreshIntervalMs,
+    timeframeDays,
   } = useSettings();
   const tl = useTimelapse();
 
@@ -209,22 +211,29 @@ const AppHeader: React.FC<{
   }, [calendarPos]);
   useEffect(() => { if (!tl.enabled) setCalendarOpen(false); }, [tl.enabled]);
 
-  const getHeatmapData = useCallback(async (days: number): Promise<number[]> => {
+  // Fetches hourly hotness z-scores for the current timeframe — used by the heatmap.
+  // Mirrors sharedTimelapseMetricsQuery but locked to 1h buckets so the day-of-week
+  // × hour-of-day grid has meaningful resolution.
+  const getHeatmapData = useCallback(async (_days: number): Promise<number[]> => {
     try {
       const filt = webAppFilter?.selected && webAppFilter.selected.length > 0
-        ? `\n| filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
+        ? `\n    | filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
         : "";
-      const q = `fetch user.events, from: now()-${days}d
-| filter isNotNull(frontend.name)${filt}
-| fieldsAdd dur_ms = toDouble(duration) / 1000000.0, hour = bin(start_time, 1h)
-| summarize
-    total = count(),
-    errors = countIf(characteristics.has_error == true),
-    avgDur = avg(dur_ms),
-    sat = countIf(dur_ms <= 3000.0),
-    tol = countIf(dur_ms > 3000.0 and dur_ms <= 12000.0),
-    by: {hour}
-| sort hour asc`;
+      const q = `fetch user.events, ${periodClause(timeframeDays)}
+    | filter isNotNull(frontend.name)${filt}
+    | fieldsAdd
+        dur_ms = toDouble(duration) / 1000000.0,
+        isAction = characteristics.classifier == "user_action" or characteristics.classifier == "user_interaction" or characteristics.classifier == "page_summary" or characteristics.classifier == "view_summary" or characteristics.classifier == "navigation",
+        bkt = bin(start_time, 1h)
+    | summarize
+        sessions = countDistinct(dt.rum.session.id),
+        totalActions = countIf(isAction),
+        avgDurationMs = avg(if(isAction, dur_ms)),
+        errorCount = countIf(characteristics.has_error == true),
+        by:{bkt}
+    | fieldsAdd errorRate = (toDouble(errorCount) / (toDouble(totalActions) + 0.0001)) * 100
+    | sort bkt asc
+    | limit 50000`;
       const start = await queryExecutionClient.queryExecute({ body: { query: q, requestTimeoutMilliseconds: 60000, maxResultRecords: 50000 } });
       let recs: any[] = [];
       if (start.state === "SUCCEEDED") { recs = (start.result?.records ?? []) as any[]; }
@@ -240,21 +249,19 @@ const AppHeader: React.FC<{
         }
       }
       if (recs.length < 2) return [];
-      const errRates = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? Number(r.errors ?? 0) / t * 100 : 0; });
-      const durs    = recs.map((r: any) => Number(r.avgDur ?? 0));
-      const apdexes = recs.map((r: any) => { const t = Number(r.total ?? 0); return t > 0 ? (Number(r.sat ?? 0) + Number(r.tol ?? 0) / 2) / t : 1; });
+      const errRates = recs.map((r: any) => Number(r.errorRate ?? 0));
+      const durs     = recs.map((r: any) => Number(r.avgDurationMs ?? 0));
+      const sessions = recs.map((r: any) => Number(r.sessions ?? 0));
       const mn = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(a.length, 1);
       const sd = (a: number[], m: number) => Math.sqrt(a.reduce((x, v) => x + (v - m) ** 2, 0) / Math.max(a.length, 1)) || 1;
       const eM = mn(errRates), eS = sd(errRates, eM);
       const dM = mn(durs),     dS = sd(durs, dM);
-      const aM = mn(apdexes),  aS = sd(apdexes, aM);
-      return recs.map((_: any, i: number) => Math.max(0,
+      return recs.map((_r: any, i: number) => sessions[i] > 0 ? Math.max(0,
         (errRates[i] - eM) / eS,
         (durs[i] - dM) / dS,
-        (aM - apdexes[i]) / aS,
-      ));
+      ) : 0);
     } catch { return []; }
-  }, [webAppFilter]);
+  }, [webAppFilter, timeframeDays]);
 
   const getHotnessForecastData = useCallback(async (days: number): Promise<number[]> => {
     try {
