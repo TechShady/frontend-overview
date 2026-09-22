@@ -213,6 +213,20 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
   const [hover, setHover]               = React.useState<{ dow: number; hour: number; val: number | null } | null>(null);
   const [filterLevel, setFilterLevel]   = React.useState<LevelKey | null>(null);
   const [showAnalysis, setShowAnalysis] = React.useState(false);
+  const [panelH, setPanelH] = React.useState(520);
+  const hmResizeRef = React.useRef<{ startY: number; startH: number } | null>(null);
+
+  React.useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!hmResizeRef.current) return;
+      const dy = e.clientY - hmResizeRef.current.startY;
+      setPanelH(Math.max(350, hmResizeRef.current.startH + dy));
+    };
+    const onUp = () => { hmResizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
 
   React.useEffect(() => {
     setLoading(true);
@@ -238,6 +252,7 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
       border: "1px solid rgba(69,137,255,0.3)", borderRadius: 12,
       boxShadow: "0 8px 40px rgba(0,0,0,0.7)", width: panelW,
       userSelect: "none", fontFamily: "'Segoe UI',system-ui,sans-serif", color: "#e8eaf0",
+      height: panelH, display: "flex", flexDirection: "column" as const,
     }}>
       {/* Header */}
       <div onMouseDown={onDragStart} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px 10px", cursor: "grab", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
@@ -264,7 +279,7 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
       </div>
 
       {/* Body */}
-      <div style={{ padding: "13px 14px 12px", overflowY: "auto", maxHeight: "85vh" }}>
+      <div style={{ padding: "13px 14px 12px", overflowY: "auto", flex: 1 }}>
         {loading ? (
           <div style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", padding: 32, fontSize: 13 }}>Loading 7 days of data…</div>
         ) : (
@@ -332,6 +347,31 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
             )}
           </>
         )}
+      </div>
+      {/* Height resize handle */}
+      <div
+        onMouseDown={e => {
+          e.stopPropagation();
+          hmResizeRef.current = { startY: e.clientY, startH: panelH };
+        }}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          right: 0,
+          width: 18,
+          height: 18,
+          cursor: "ns-resize",
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "flex-end",
+          padding: "3px",
+          zIndex: 1,
+        }}
+      >
+        <svg width="10" height="6" viewBox="0 0 10 6" style={{ opacity: 0.3 }}>
+          <line x1="0" y1="2" x2="10" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          <line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
       </div>
     </div>,
     document.body
