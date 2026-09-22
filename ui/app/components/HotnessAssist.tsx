@@ -153,6 +153,7 @@ export interface HotnessAssistData {
   allHotness: number[];
   insights: InsightItem[];
   recommendations: RecommendationItem[];
+  worstProblems?: Array<{ displayId?: string; title: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +563,9 @@ export function HotnessAssistPanel({
   table{border-collapse:collapse;width:100%;}.toolbar{text-align:right;margin-bottom:16px;}.toolbar button{background:#FF6B35;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;}
   .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;}.kpi-tile{background:rgba(128,128,128,0.08);border:1px solid rgba(128,128,128,0.15);border-radius:8px;padding:10px 14px;}
   .card-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}.card{border-radius:8px;padding:12px 14px;}
+  .page-break{page-break-before:always;}
+  .pat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}.pat-card{border-radius:8px;padding:12px 14px;}
+  .diff-table{width:100%;border-collapse:collapse;margin-bottom:20px;}.diff-table th{padding:5px 10px;font-size:10px;font-weight:700;opacity:0.5;text-transform:uppercase;border-bottom:1px solid rgba(128,128,128,0.2);text-align:left;}.diff-table td{padding:5px 10px;font-size:12px;border-bottom:1px solid rgba(128,128,128,0.08);}
 </style></head><body>
 <div class="toolbar no-print"><button onclick="window.print()">Print / Save PDF</button></div>
 <h1>🔥 Hotness Assist Report — Frontend Overview</h1>
@@ -578,14 +582,99 @@ export function HotnessAssistPanel({
 <div style="background:rgba(128,128,128,0.04);border:1px solid rgba(128,128,128,0.15);border-radius:8px;padding:8px 10px 6px;margin-bottom:20px">
   <svg width="100%" height="130" viewBox="0 0 ${svgW} 130" preserveAspectRatio="none" style="display:block">${threshLines}${bars}${markers}</svg>
 </div>
-<h2>W1 vs B1</h2>
+<h2>Pattern Analysis</h2>
+<div class="pat-grid">
+  <div class="pat-card" style="background:${patternColor}12;border:1px solid ${patternColor}40">
+    <div style="font-size:9px;opacity:0.55;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Pattern Analysis</div>
+    <div style="font-size:14px;font-weight:700;color:${patternColor}">${patternLabel}</div>
+    <div style="font-size:11px;opacity:0.55;margin-top:4px">${
+      data.alertPattern === "deployment"     ? "Code / config change most likely" :
+      data.alertPattern === "load-induced"   ? "Infrastructure capacity limit hit" :
+      data.alertPattern === "infrastructure" ? "CDN, network, or origin saturation" : "Insufficient signal for classification"
+    }</div>
+  </div>
+  <div class="pat-card" style="background:${burstColor}12;border:1px solid ${burstColor}40">
+    <div style="font-size:9px;opacity:0.55;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Spike Duration</div>
+    <div style="font-size:14px;font-weight:700;color:${burstColor}">${burstLabel}</div>
+    <div style="font-size:11px;opacity:0.55;margin-top:4px">${
+      data.burstType === "chronic"   ? "Needs active remediation" :
+      data.burstType === "sustained" ? "Likely needed intervention" :
+      data.burstType === "transient" ? "Appears self-resolved" : "No elevated buckets"
+    }</div>
+  </div>
+</div>
+<div class="page-break"></div>
+<h2>What's Different — Worst #1 vs Best #1</h2>
 <div class="card-grid">
   <div class="card" style="background:rgba(255,7,58,0.05);border:1px solid rgba(255,7,58,0.2)"><div style="font-size:11px;font-weight:700;color:#FF073A;text-transform:uppercase;margin-bottom:6px">🔥 Worst #1 — Bucket ${data.worstIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.worstBucketKey}</div><div style="font-size:13px;font-weight:700;color:#FF073A;margin-bottom:8px">Z=${data.worstHotZ.toFixed(2)} · ${data.worstDriver}</div><table><tbody>${worstMetrics}</tbody></table></div>
   <div class="card" style="background:rgba(13,156,41,0.04);border:1px solid rgba(13,156,41,0.2)"><div style="font-size:11px;font-weight:700;color:#0D9C29;text-transform:uppercase;margin-bottom:6px">✨ Best #1 — Bucket ${data.bestIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.bestBucketKey}</div><div style="font-size:13px;font-weight:700;color:#0D9C29;margin-bottom:8px">Z=${(data.allHotness[data.bestIdx] ?? 0).toFixed(2)} · Optimal</div><table><tbody>${bestMetrics}</tbody></table></div>
 </div>
-${data.worst2Idx !== data.worstIdx ? `<h2>W1 vs W2</h2><div class="card-grid"><div class="card" style="background:rgba(255,7,58,0.05);border:1px solid rgba(255,7,58,0.2)"><div style="font-size:11px;font-weight:700;color:#FF073A;text-transform:uppercase;margin-bottom:6px">🔥 Worst #1 — Bucket ${data.worstIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.worstBucketKey}</div><div style="font-size:13px;font-weight:700;color:#FF073A;margin-bottom:8px">Z=${data.worstHotZ.toFixed(2)}</div><table><tbody>${worstMetrics}</tbody></table></div><div class="card" style="background:rgba(255,143,171,0.05);border:1px solid rgba(255,143,171,0.25)"><div style="font-size:11px;font-weight:700;color:#FF8FAB;text-transform:uppercase;margin-bottom:6px">🔥 Worst #2 — Bucket ${data.worst2Idx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.worst2BucketKey}</div><div style="font-size:13px;font-weight:700;color:#FF8FAB;margin-bottom:8px">Z=${data.worst2HotZ.toFixed(2)}</div><table><tbody>${worst2Metrics}</tbody></table></div></div>` : ""}
-${data.best2Idx !== data.bestIdx ? `<h2>B1 vs B2</h2><div class="card-grid"><div class="card" style="background:rgba(13,156,41,0.04);border:1px solid rgba(13,156,41,0.2)"><div style="font-size:11px;font-weight:700;color:#0D9C29;text-transform:uppercase;margin-bottom:6px">✨ Best #1 — Bucket ${data.bestIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.bestBucketKey}</div><div style="font-size:13px;font-weight:700;color:#0D9C29;margin-bottom:8px">Z=${(data.allHotness[data.bestIdx] ?? 0).toFixed(2)}</div><table><tbody>${bestMetrics}</tbody></table></div><div class="card" style="background:rgba(110,231,160,0.04);border:1px solid rgba(110,231,160,0.2)"><div style="font-size:11px;font-weight:700;color:#6EE7A0;text-transform:uppercase;margin-bottom:6px">✨ Best #2 — Bucket ${data.best2Idx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.best2BucketKey}</div><div style="font-size:13px;font-weight:700;color:#6EE7A0;margin-bottom:8px">Z=${(data.allHotness[data.best2Idx] ?? 0).toFixed(2)}</div><table><tbody>${best2Metrics}</tbody></table></div></div>` : ""}
+<table class="diff-table">
+  <thead><tr><th>Metric</th><th style="color:#0D9C29">Best</th><th style="color:#FF073A">Worst</th><th>Gap</th></tr></thead>
+  <tbody>
+    ${([
+      { label: "Score",      best: `${data.bestScore}/100`,                    worst: `${data.worstScore}/100`,                   gap: `−${data.bestScore - data.worstScore}pt`,  bad: data.bestScore - data.worstScore > 15 },
+      { label: "Error Rate", best: `${data.bestRow.errorRate.toFixed(1)}%`,    worst: `${data.worstRow.errorRate.toFixed(1)}%`,   gap: `+${data.errorRateDelta.toFixed(1)}pp`,         bad: data.errorRateDelta > 1 },
+      { label: "Avg Load",   best: `${Math.round(data.bestRow.avgDurationMs)}ms`, worst: `${Math.round(data.worstRow.avgDurationMs)}ms`, gap: `+${Math.round(data.durationDelta)}ms`,  bad: data.durationDelta > 200 },
+      ...(data.lcpDelta  != null ? [{ label: "LCP",  best: `${Math.round(data.bestRow.lcp!)}ms`,  worst: `${Math.round(data.worstRow.lcp!)}ms`,  gap: `+${Math.round(data.lcpDelta)}ms`,       bad: data.lcpDelta  > 300 }] : []),
+      ...(data.inpDelta  != null ? [{ label: "INP",  best: `${Math.round(data.bestRow.inp!)}ms`,  worst: `${Math.round(data.worstRow.inp!)}ms`,  gap: `+${Math.round(data.inpDelta)}ms`,       bad: data.inpDelta  > 50  }] : []),
+      ...(data.clsDelta  != null ? [{ label: "CLS",  best: data.bestRow.cls!.toFixed(3),          worst: data.worstRow.cls!.toFixed(3),          gap: `+${data.clsDelta.toFixed(3)}`,           bad: data.clsDelta  > 0.05 }] : []),
+      ...(data.ttfbDelta != null ? [{ label: "TTFB", best: `${Math.round(data.bestRow.ttfb!)}ms`, worst: `${Math.round(data.worstRow.ttfb!)}ms`, gap: `+${Math.round(data.ttfbDelta)}ms`,      bad: data.ttfbDelta > 100 }] : []),
+      { label: "Sessions", best: fmtCount(data.bestRow.sessions), worst: fmtCount(data.worstRow.sessions), gap: "—", bad: false },
+    ] as { label: string; best: string; worst: string; gap: string; bad: boolean }[]).map(r => `<tr><td>${r.label}</td><td style="color:#0D9C29;font-weight:600">${r.best}</td><td style="color:${r.bad ? "#FF073A" : "#e0e0e0"};font-weight:600">${r.worst}</td><td style="color:${r.bad ? "#FF073A" : "#4589FF"};font-weight:700">${r.gap}</td></tr>`).join("")}
+  </tbody>
+</table>
+${data.worst2Idx !== data.worstIdx ? `<div class="page-break"></div>
+<h2>Common Bad Signals — Worst #1 vs Worst #2</h2>
+<div class="card-grid">
+  <div class="card" style="background:rgba(255,7,58,0.05);border:1px solid rgba(255,7,58,0.2)"><div style="font-size:11px;font-weight:700;color:#FF073A;text-transform:uppercase;margin-bottom:6px">🔥 Worst #1 — Bucket ${data.worstIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.worstBucketKey}</div><div style="font-size:13px;font-weight:700;color:#FF073A;margin-bottom:8px">Z=${data.worstHotZ.toFixed(2)}</div><table><tbody>${worstMetrics}</tbody></table></div>
+  <div class="card" style="background:rgba(255,143,171,0.05);border:1px solid rgba(255,143,171,0.25)"><div style="font-size:11px;font-weight:700;color:#FF8FAB;text-transform:uppercase;margin-bottom:6px">🔥 Worst #2 — Bucket ${data.worst2Idx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.worst2BucketKey}</div><div style="font-size:13px;font-weight:700;color:#FF8FAB;margin-bottom:8px">Z=${data.worst2HotZ.toFixed(2)}</div><table><tbody>${worst2Metrics}</tbody></table></div>
+</div>
+<table class="diff-table">
+  <thead><tr><th>Metric</th><th style="color:#FF073A">W1 (bkt ${data.worstIdx + 1})</th><th style="color:#FF8FAB">W2 (bkt ${data.worst2Idx + 1})</th><th>Pattern</th></tr></thead>
+  <tbody>
+    ${([
+      { label: "Error Rate", v1: `${data.worstRow.errorRate.toFixed(1)}%`,  v2: `${data.worst2Row.errorRate.toFixed(1)}%`,  bothHot: data.worstRow.errorRate > 2 && data.worst2Row.errorRate > 2 },
+      { label: "Avg Load",   v1: `${Math.round(data.worstRow.avgDurationMs)}ms`, v2: `${Math.round(data.worst2Row.avgDurationMs)}ms`, bothHot: data.worstRow.avgDurationMs > 4000 && data.worst2Row.avgDurationMs > 4000 },
+      ...(data.worstRow.lcp  != null && data.worst2Row.lcp  != null ? [{ label: "LCP",  v1: `${Math.round(data.worstRow.lcp)}ms`,  v2: `${Math.round(data.worst2Row.lcp)}ms`,  bothHot: data.worstRow.lcp  > 2500 && data.worst2Row.lcp  > 2500 }] : []),
+      ...(data.worstRow.inp  != null && data.worst2Row.inp  != null ? [{ label: "INP",  v1: `${Math.round(data.worstRow.inp)}ms`,  v2: `${Math.round(data.worst2Row.inp)}ms`,  bothHot: data.worstRow.inp  > 200  && data.worst2Row.inp  > 200  }] : []),
+      ...(data.worstRow.cls  != null && data.worst2Row.cls  != null ? [{ label: "CLS",  v1: data.worstRow.cls.toFixed(3),           v2: data.worst2Row.cls.toFixed(3),           bothHot: data.worstRow.cls  > 0.1  && data.worst2Row.cls  > 0.1  }] : []),
+      ...(data.worstRow.ttfb != null && data.worst2Row.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(data.worstRow.ttfb)}ms`, v2: `${Math.round(data.worst2Row.ttfb)}ms`, bothHot: data.worstRow.ttfb > 800  && data.worst2Row.ttfb > 800  }] : []),
+    ] as { label: string; v1: string; v2: string; bothHot: boolean }[]).map(r => `<tr><td>${r.label}</td><td style="color:#FF3D9A;font-weight:600">${r.v1}</td><td style="color:#FF8FAB;font-weight:600">${r.v2}</td><td style="color:${r.bothHot ? "#FF832B" : "#888"};font-weight:700">${r.bothHot ? "Both hot" : "—"}</td></tr>`).join("")}
+  </tbody>
+</table>` : ""}
+${data.best2Idx !== data.bestIdx ? `<div class="page-break"></div>
+<h2>Common Good Signals — Best #1 vs Best #2</h2>
+<div class="card-grid">
+  <div class="card" style="background:rgba(13,156,41,0.04);border:1px solid rgba(13,156,41,0.2)"><div style="font-size:11px;font-weight:700;color:#0D9C29;text-transform:uppercase;margin-bottom:6px">✨ Best #1 — Bucket ${data.bestIdx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.bestBucketKey}</div><div style="font-size:13px;font-weight:700;color:#0D9C29;margin-bottom:8px">Z=${(data.allHotness[data.bestIdx] ?? 0).toFixed(2)}</div><table><tbody>${bestMetrics}</tbody></table></div>
+  <div class="card" style="background:rgba(110,231,160,0.04);border:1px solid rgba(110,231,160,0.2)"><div style="font-size:11px;font-weight:700;color:#6EE7A0;text-transform:uppercase;margin-bottom:6px">✨ Best #2 — Bucket ${data.best2Idx + 1}</div><div style="font-size:10px;opacity:0.4;font-family:monospace;margin-bottom:6px">${data.best2BucketKey}</div><div style="font-size:13px;font-weight:700;color:#6EE7A0;margin-bottom:8px">Z=${(data.allHotness[data.best2Idx] ?? 0).toFixed(2)}</div><table><tbody>${best2Metrics}</tbody></table></div>
+</div>
+<table class="diff-table">
+  <thead><tr><th>Metric</th><th style="color:#0D9C29">B1 (bkt ${data.bestIdx + 1})</th><th style="color:#6EE7A0">B2 (bkt ${data.best2Idx + 1})</th><th>Pattern</th></tr></thead>
+  <tbody>
+    ${([
+      { label: "Error Rate", v1: `${data.bestRow.errorRate.toFixed(1)}%`,  v2: `${data.best2Row.errorRate.toFixed(1)}%`,  bothHealthy: data.bestRow.errorRate < 1 && data.best2Row.errorRate < 1 },
+      { label: "Avg Load",   v1: `${Math.round(data.bestRow.avgDurationMs)}ms`, v2: `${Math.round(data.best2Row.avgDurationMs)}ms`, bothHealthy: data.bestRow.avgDurationMs < 3000 && data.best2Row.avgDurationMs < 3000 },
+      ...(data.bestRow.lcp  != null && data.best2Row.lcp  != null ? [{ label: "LCP",  v1: `${Math.round(data.bestRow.lcp)}ms`,  v2: `${Math.round(data.best2Row.lcp)}ms`,  bothHealthy: data.bestRow.lcp  <= 2500 && data.best2Row.lcp  <= 2500 }] : []),
+      ...(data.bestRow.inp  != null && data.best2Row.inp  != null ? [{ label: "INP",  v1: `${Math.round(data.bestRow.inp)}ms`,  v2: `${Math.round(data.best2Row.inp)}ms`,  bothHealthy: data.bestRow.inp  <= 200  && data.best2Row.inp  <= 200  }] : []),
+      ...(data.bestRow.cls  != null && data.best2Row.cls  != null ? [{ label: "CLS",  v1: data.bestRow.cls.toFixed(3),           v2: data.best2Row.cls.toFixed(3),           bothHealthy: data.bestRow.cls  <= 0.1  && data.best2Row.cls  <= 0.1  }] : []),
+      ...(data.bestRow.ttfb != null && data.best2Row.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(data.bestRow.ttfb)}ms`, v2: `${Math.round(data.best2Row.ttfb)}ms`, bothHealthy: data.bestRow.ttfb <= 800  && data.best2Row.ttfb <= 800  }] : []),
+    ] as { label: string; v1: string; v2: string; bothHealthy: boolean }[]).map(r => `<tr><td>${r.label}</td><td style="color:#0D9C29;font-weight:600">${r.v1}</td><td style="color:#6EE7A0;font-weight:600">${r.v2}</td><td style="color:${r.bothHealthy ? "#0D9C29" : "#888"};font-weight:700">${r.bothHealthy ? "Both healthy" : "—"}</td></tr>`).join("")}
+  </tbody>
+</table>` : ""}
 ${insightsHtml}
+${data.recommendations.length > 0 ? `<div class="page-break"></div><h2>Recommendations</h2>${data.recommendations.map(rec => {
+  const bCol = rec.impact === "high" ? "#C21930" : rec.impact === "medium" ? "#FF832B" : "#6b7280";
+  const bBg  = rec.impact === "high" ? "rgba(194,25,48,0.12)" : rec.impact === "medium" ? "rgba(255,131,43,0.12)" : "rgba(128,128,128,0.12)";
+  return `<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-radius:6px;background:rgba(128,128,128,0.05);border:1px solid rgba(128,128,128,0.12);margin-bottom:5px"><span style="font-size:10px;padding:2px 6px;border-radius:3px;font-weight:700;text-transform:uppercase;white-space:nowrap;flex-shrink:0;background:${bBg};color:${bCol}">${rec.impact}</span><span style="font-size:12px;line-height:1.5">${rec.text}</span></div>`;
+}).join("")}` : ""}
+${(data.cwvBudget.lcp.good + data.cwvBudget.lcp.needs + data.cwvBudget.lcp.poor + data.cwvBudget.inp.good + data.cwvBudget.inp.needs + data.cwvBudget.inp.poor) > 0 ? `<div class="page-break"></div><h2>CWV Budget — Full Period Distribution</h2><div style="background:rgba(128,128,128,0.04);border:1px solid rgba(128,128,128,0.15);border-radius:8px;padding:12px 16px;margin-bottom:20px">${(["lcp","inp","cls","ttfb"] as const).map(vital => {
+  const b = data.cwvBudget[vital]; const total = b.good + b.needs + b.poor; if (total === 0) return "";
+  const goodPct = Math.round(b.good / total * 100); const needsPct = Math.round(b.needs / total * 100); const poorPct = 100 - goodPct - needsPct;
+  const lbl = {lcp:"LCP",inp:"INP",cls:"CLS",ttfb:"TTFB"}[vital]; const thr = {lcp:"≤2500ms",inp:"≤200ms",cls:"≤0.1",ttfb:"≤800ms"}[vital];
+  return `<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;font-weight:600">${lbl} <span style="font-size:10px;opacity:0.45">Good ${thr}</span></span><span style="font-size:11px;opacity:0.5">${b.good}G · ${b.needs}NI · ${b.poor}P</span></div><div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px">${goodPct > 0 ? `<div style="flex:${goodPct};background:#0D9C29;opacity:0.8"></div>` : ""}${needsPct > 0 ? `<div style="flex:${needsPct};background:#FFF04D;opacity:0.8"></div>` : ""}${poorPct > 0 ? `<div style="flex:${poorPct};background:#FF073A;opacity:0.8"></div>` : ""}</div></div>`;
+}).join("")}<div style="display:flex;gap:16px;margin-top:4px;font-size:10px;opacity:0.45"><span>&#9632; Good</span><span style="color:#FFF04D">&#9632; Needs Improvement</span><span style="color:#FF073A">&#9632; Poor</span></div></div>` : ""}
+${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Problems During Worst Window</h2><div style="background:rgba(255,7,58,0.04);border:1px solid rgba(255,7,58,0.15);border-radius:8px;padding:10px 14px;margin-bottom:20px">${data.worstProblems.map((p, i) => `<div style="font-size:12px;display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:${i < data.worstProblems!.length - 1 ? "1px solid rgba(128,128,128,0.08)" : "none"}"><span style="color:#FF073A;font-size:10px;flex-shrink:0">&#9670;</span>${p.displayId ? `<span style="font-family:monospace;font-size:10px;color:#FF832B;flex-shrink:0">${p.displayId}</span>` : ""}<span style="opacity:0.8">${p.title}</span></div>`).join("")}</div>` : ""}
 <div style="text-align:center;margin-top:30px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08);font-size:10px;color:#555">Hotness Assist | Frontend Overview | ${data.analyzedCount}/${data.allHotness.length} buckets analyzed | ${ts}</div>
 </body></html>`;
   };
@@ -696,6 +785,9 @@ ${insightsHtml}
           </div>
         </div>
 
+        {/* What's Different — W1 vs B1 title above cards */}
+        <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${cardsDelay - 150}ms` }}>What's Different — Worst #1 vs Best #1</div>
+
         {/* Pair 1: W1 vs B1 */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${cardsDelay}ms` }}>
           {/* W1 */}
@@ -748,9 +840,8 @@ ${insightsHtml}
           </div>
         </div>
 
-        {/* What's Different — W1 vs B1 */}
+        {/* What's Different — W1 vs B1 table */}
         <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay}ms` }}>
-          <div className="uj-ai-section-title">What's Different — Worst #1 vs Best #1</div>
           <div style={{ background: "rgba(128,128,128,0.03)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr" }}>
               {["Metric", "Best", "Worst", "Gap"].map((h, i) => (
@@ -790,6 +881,7 @@ ${insightsHtml}
             ...(w1.ttfb != null && w2.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(w1.ttfb)}ms`, v2: `${Math.round(w2.ttfb)}ms`, z1: data.worstHotZ, z2: data.worst2HotZ, bothHot: w1.ttfb > 800  && w2.ttfb > 800  }] : []),
           ];
           return (<>
+            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 50}ms` }}>Common Bad Signals — Worst #1 vs Worst #2</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 200}ms` }}>
               {/* W1 */}
               <div style={{ background: "rgba(255,7,58,0.05)", border: "1px solid rgba(255,7,58,0.2)", borderRadius: 8, padding: "10px 12px" }}>
@@ -835,7 +927,6 @@ ${insightsHtml}
               </div>
             </div>
             <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 300}ms` }}>
-              <div className="uj-ai-section-title">Common Bad Signals — Worst #1 vs Worst #2</div>
               <div style={{ background: "rgba(128,128,128,0.03)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr" }}>
                   {["Metric", `W1 (bkt ${data.worstIdx + 1})`, `W2 (bkt ${data.worst2Idx + 1})`, "Pattern"].map((h, i) => (
@@ -868,6 +959,7 @@ ${insightsHtml}
             ...(b1.ttfb != null && b2.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(b1.ttfb)}ms`, v2: `${Math.round(b2.ttfb)}ms`, bothHealthy: b1.ttfb <= 800  && b2.ttfb <= 800  }] : []),
           ];
           return (<>
+            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 250}ms` }}>Common Good Signals — Best #1 vs Best #2</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 400}ms` }}>
               {/* B1 */}
               <div style={{ background: "rgba(13,156,41,0.04)", border: "1px solid rgba(13,156,41,0.2)", borderRadius: 8, padding: "10px 12px" }}>
@@ -913,7 +1005,6 @@ ${insightsHtml}
               </div>
             </div>
             <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 500}ms` }}>
-              <div className="uj-ai-section-title">Common Good Signals — Best #1 vs Best #2</div>
               <div style={{ background: "rgba(128,128,128,0.03)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr" }}>
                   {["Metric", `B1 (bkt ${data.bestIdx + 1})`, `B2 (bkt ${data.best2Idx + 1})`, "Pattern"].map((h, i) => (
@@ -1001,6 +1092,22 @@ ${insightsHtml}
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Active Davis Problems */}
+        {data.worstProblems && data.worstProblems.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="uj-ai-section-title">Active Davis Problems During Worst Window</div>
+            <div style={{ background: "rgba(255,7,58,0.04)", border: "1px solid rgba(255,7,58,0.15)", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+              {data.worstProblems.map((p, i) => (
+                <div key={i} style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, padding: "2px 0", borderBottom: i < data.worstProblems!.length - 1 ? "1px solid rgba(128,128,128,0.08)" : "none" }}>
+                  <span style={{ color: "#FF073A", fontSize: 10, flexShrink: 0 }}>◆</span>
+                  {p.displayId && <span style={{ fontFamily: "monospace", fontSize: 10, color: "#FF832B", flexShrink: 0 }}>{p.displayId}</span>}
+                  <span style={{ opacity: 0.8 }}>{p.title}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
