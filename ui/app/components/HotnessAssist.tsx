@@ -504,6 +504,24 @@ export function HotnessAssistPanel({
   onDragStart: (e: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   ensureHAStyles();
+  const [panelW, setPanelW] = React.useState(648);
+  const [panelH, setPanelH] = React.useState(600);
+  const resizeRef = React.useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+
+  React.useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const dx = e.clientX - resizeRef.current.startX;
+      const dy = e.clientY - resizeRef.current.startY;
+      setPanelW(Math.max(380, resizeRef.current.startW + dx));
+      setPanelH(Math.max(420, resizeRef.current.startH + dy));
+    };
+    const onUp = () => { resizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
+
   const maxZ = Math.max(0.5, ...data.allHotness);
   const summaryWords    = data.summary.split(/\s+/).length;
   const summaryDuration = summaryWords * 60;
@@ -728,7 +746,7 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
   };
 
   return createPortal(
-    <div style={{ position: "fixed", left: pos.x, top: pos.y, width: 648, maxHeight: "calc(100vh - 36px)", background: "var(--dt-colors-background-base-default,#0f1428)", border: "1px solid rgba(255,107,53,0.3)", borderRadius: 10, boxShadow: "0 16px 56px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,107,53,0.08)", zIndex: 601, userSelect: "none", fontSize: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ position: "fixed", left: pos.x, top: pos.y, width: panelW, height: panelH, background: "var(--dt-colors-background-base-default,#0f1428)", border: "1px solid rgba(255,107,53,0.3)", borderRadius: 10, boxShadow: "0 16px 56px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,107,53,0.08)", zIndex: 601, userSelect: "none", fontSize: 12, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
       {/* Header */}
       <div onMouseDown={onDragStart} style={{ padding: "11px 14px", background: "linear-gradient(135deg, rgba(255,107,53,0.13) 0%, rgba(255,61,154,0.07) 100%)", borderBottom: "1px solid rgba(255,107,53,0.2)", cursor: "grab", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -1198,6 +1216,30 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
         <div style={{ padding: "6px 0", borderTop: "1px solid rgba(128,128,128,0.1)", fontSize: 9, opacity: 0.3, lineHeight: 1.5 }}>
           Drag header to reposition · Z-scores computed from shared fleet KPI baselines · Composite score: error rate 25%, avg load 25%, LCP 22%, INP 18%, CLS 6%, TTFB 4%
         </div>
+      </div>
+      {/* Resize handle */}
+      <div
+        onMouseDown={e => {
+          e.stopPropagation();
+          resizeRef.current = { startX: e.clientX, startY: e.clientY, startW: panelW, startH: panelH };
+        }}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          right: 0,
+          width: 18,
+          height: 18,
+          cursor: "nwse-resize",
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "flex-end",
+          padding: "3px",
+        }}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: 0.3 }}>
+          <line x1="1" y1="9" x2="9" y2="1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          <line x1="5" y1="9" x2="9" y2="5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
       </div>
     </div>,
     document.body,
