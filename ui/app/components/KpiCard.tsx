@@ -161,15 +161,15 @@ function KpiPanelOverlay({ label, rawValue, sparkline, color, panel, onClose, ef
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
               <div style={{ textAlign: "center", padding: "12px 20px", borderRadius: 10, background: `${anomalyStatus.color}18`, border: `1px solid ${anomalyStatus.color}40` }}>
                 <div style={{ fontSize: 22, fontWeight: 800, color: anomalyStatus.color }}>{anomalyStatus.label}</div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{Math.abs(deviation).toFixed(2)}σ from mean</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{Math.abs(deviation).toFixed(2)}{"\u03C3"} from mean</div>
               </div>
             </div>
             {[
               { label: "Current value", value: fmt(curr), col: color ?? "#4589FF" },
               { label: "Historical mean", value: fmt(mean), col: "rgba(255,255,255,0.7)" },
-              { label: "Std deviation (±1σ)", value: `±${fmt(std)}`, col: "rgba(255,255,255,0.6)" },
+              { label: "Std deviation (±1\u03C3)", value: `±${fmt(std)}`, col: "rgba(255,255,255,0.6)" },
               { label: "Normal range", value: `${fmt(Math.max(0, mean - std))} – ${fmt(mean + std)}`, col: "#0D9C29" },
-              { label: "Deviation", value: `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}σ`, col: anomalyStatus.color },
+              { label: "Deviation", value: `${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}\u03C3`, col: anomalyStatus.color },
             ].map((r, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.04)", borderRadius: 8 }}>
                 <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{r.label}</span>

@@ -21,11 +21,11 @@ type LevelKey = "nodata" | "baseline" | "low" | "warm" | "hot" | "spike";
 
 const LEVELS: { key: LevelKey; label: string; color: string; min: number | null; tip: string }[] = [
   { key: "nodata",   label: "No Data",  color: "rgba(255,255,255,0.07)", min: null,      tip: "No recorded data for this hour × day slot" },
-  { key: "baseline", label: "Baseline", color: "rgba(69,137,255,0.18)",  min: -Infinity, tip: "Normal performance, at or near average (< 0.1σ)" },
-  { key: "low",      label: "Low",      color: "rgba(69,137,255,0.55)",  min: 0.1,       tip: "Slightly elevated (0.1 – 0.75σ)" },
-  { key: "warm",     label: "Warm",     color: "#FFF04D",                min: 0.75,      tip: "Moderately elevated (0.75 – 1.5σ)" },
-  { key: "hot",      label: "Hot",      color: "#FF3D9A",                min: 1.5,       tip: "Significantly elevated (1.5 – 2.5σ)" },
-  { key: "spike",    label: "Spike",    color: "#FF073A",                min: 2.5,       tip: "Critical spike (> 2.5σ)" },
+  { key: "baseline", label: "Baseline", color: "rgba(69,137,255,0.18)",  min: -Infinity, tip: "Normal performance, at or near average (< 0.1\\u03C3)" },
+  { key: "low",      label: "Low",      color: "rgba(69,137,255,0.55)",  min: 0.1,       tip: "Slightly elevated (0.1 – 0.75\\u03C3)" },
+  { key: "warm",     label: "Warm",     color: "#FFF04D",                min: 0.75,      tip: "Moderately elevated (0.75 – 1.5\\u03C3)" },
+  { key: "hot",      label: "Hot",      color: "#FF3D9A",                min: 1.5,       tip: "Significantly elevated (1.5 – 2.5\\u03C3)" },
+  { key: "spike",    label: "Spike",    color: "#FF073A",                min: 2.5,       tip: "Critical spike (> 2.5\\u03C3)" },
 ];
 
 function getLevel(val: number | null): LevelKey {
@@ -108,9 +108,9 @@ function analyzeGrid(grid: (number | null)[][]): HeatAnalysis {
   const peakAvg = hourAvg[worstHourIdx];
 
   if (peakAvg >= 2.5)
-    insights.push(`Critical spike zone at ${fmtHour(worstHourIdx)} — average Z-score ${peakAvg.toFixed(1)}σ across the week.`);
+    insights.push(`Critical spike zone at ${fmtHour(worstHourIdx)} — average Z-score ${peakAvg.toFixed(1)}\\u03C3 across the week.`);
   else if (peakAvg >= 1.5)
-    insights.push(`Consistently hot at ${fmtHour(worstHourIdx)} — average Z-score ${peakAvg.toFixed(1)}σ across the week.`);
+    insights.push(`Consistently hot at ${fmtHour(worstHourIdx)} — average Z-score ${peakAvg.toFixed(1)}\\u03C3 across the week.`);
   else if (peakAvg >= 0.75)
     insights.push(`Warm zone centered at ${fmtHour(worstHourIdx)} — mildly elevated throughout the week.`);
   else
@@ -125,7 +125,7 @@ function analyzeGrid(grid: (number | null)[][]): HeatAnalysis {
     insights.push(`Weekends are ${((weekendMean / safeWeekday - 1) * 100).toFixed(0)}% hotter than weekdays — possible leisure or batch workload.`);
     recs.push("Review weekend-specific workloads and CDN configurations causing elevated CWV degradation on Saturday–Sunday.");
   } else {
-    insights.push(`CWV degradation is consistent across weekdays and weekends (weekday avg: ${weekdayMean.toFixed(2)}σ, weekend avg: ${weekendMean.toFixed(2)}σ).`);
+    insights.push(`CWV degradation is consistent across weekdays and weekends (weekday avg: ${weekdayMean.toFixed(2)}\\u03C3, weekend avg: ${weekendMean.toFixed(2)}\\u03C3).`);
   }
 
   if (spikeCellCount > 0) {
@@ -143,8 +143,8 @@ function analyzeGrid(grid: (number | null)[][]): HeatAnalysis {
 
   return {
     hotZoneText,
-    worstDayText:  `${DAYS[worstDayIdx]} (avg ${dayAvg[worstDayIdx].toFixed(2)}σ)`,
-    worstHourText: `${fmtHour(worstHourIdx)} (avg ${hourAvg[worstHourIdx].toFixed(2)}σ)`,
+    worstDayText:  `${DAYS[worstDayIdx]} (avg ${dayAvg[worstDayIdx].toFixed(2)}\\u03C3)`,
+    worstHourText: `${fmtHour(worstHourIdx)} (avg ${hourAvg[worstHourIdx].toFixed(2)}\\u03C3)`,
     hotCellCount, spikeCellCount, insights, recommendations: recs,
   };
 }
@@ -304,7 +304,7 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
             ))}
 
             <div style={{ height: 22, marginTop: 5, fontSize: 11, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
-              {hover ? (hover.val !== null ? `${DAYS[hover.dow]} ${fmtHour(hover.hour)} — avg Z-score: ${hover.val.toFixed(2)}σ` : `${DAYS[hover.dow]} ${fmtHour(hover.hour)} — no data`) : "Hover a cell to see average hotness"}
+              {hover ? (hover.val !== null ? `${DAYS[hover.dow]} ${fmtHour(hover.hour)} — avg Z-score: ${hover.val.toFixed(2)}\\u03C3` : `${DAYS[hover.dow]} ${fmtHour(hover.hour)} — no data`) : "Hover a cell to see average hotness"}
             </div>
 
             {/* Clickable legend */}
