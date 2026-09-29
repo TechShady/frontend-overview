@@ -586,6 +586,34 @@ function KpiPanelOverlay({ label, rawValue, sparkline, color, panel, onClose, ef
 }
 
 // ---------------------------------------------------------------------------
+// Build a fallback DQL for "Open with..." when no query prop is provided
+// ---------------------------------------------------------------------------
+function buildDefaultDql(label: string): string {
+  const lbl = label.toLowerCase();
+  if (/\blcp\b|largest contentful/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter isNotNull(web_vitals.largest_contentful_paint)\n| summarize lcp = avg(toDouble(web_vitals.largest_contentful_paint)/1e6), sessions = countDistinct(dt.rum.session.id), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/\bfcp\b|first contentful/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter isNotNull(web_vitals.first_contentful_paint)\n| summarize fcp = avg(toDouble(web_vitals.first_contentful_paint)/1e6), sessions = countDistinct(dt.rum.session.id), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/\bcls\b|cumulative layout/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter isNotNull(web_vitals.cumulative_layout_shift)\n| summarize cls = avg(toDouble(web_vitals.cumulative_layout_shift)), sessions = countDistinct(dt.rum.session.id), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/\binp\b|interaction to next/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter isNotNull(web_vitals.interaction_to_next_paint)\n| summarize inp = avg(toDouble(web_vitals.interaction_to_next_paint)/1e6), sessions = countDistinct(dt.rum.session.id), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/\bttfb\b|time to first byte/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter isNotNull(web_vitals.time_to_first_byte)\n| summarize ttfb = avg(toDouble(web_vitals.time_to_first_byte)/1e6), sessions = countDistinct(dt.rum.session.id), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/error.{0,5}rate/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| summarize total = count(), errors = countIf(characteristics.has_error == true), by: {bkt = bin(start_time, 1h)}\n| fieldsAdd errorRate = toDouble(errors)/toDouble(total)*100\n| sort bkt asc`;
+  if (/\berror/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| filter characteristics.has_error == true\n| summarize errors = count(), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/session/.test(lbl))
+    return `fetch user.sessions, from: now()-7d\n| summarize sessions = count(), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/duration|load time/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| summarize avgDuration = avg(toDouble(duration)/1e6), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+  if (/apdex/.test(lbl))
+    return `fetch user.events, from: now()-7d\n| summarize sat = countIf(toDouble(duration)/1e6 <= 3), tol = countIf(toDouble(duration)/1e6 > 3 and toDouble(duration)/1e6 <= 12), fru = countIf(toDouble(duration)/1e6 > 12), by: {bkt = bin(start_time, 1h)}\n| fieldsAdd apdex = (sat + tol*0.5)/(sat+tol+fru)\n| sort bkt asc`;
+  return `fetch user.events, from: now()-7d\n| summarize sessions = countDistinct(dt.rum.session.id), errors = countIf(characteristics.has_error == true), by: {bkt = bin(start_time, 1h)}\n| sort bkt asc`;
+}
+
+// ---------------------------------------------------------------------------
 // KpiCard — main component
 // ---------------------------------------------------------------------------
 export interface KpiCardProps {
@@ -674,7 +702,8 @@ export function KpiCard({
   };
   const doOpenNotebook = () => {
     setMenuOpen(false);
-    if (query) sendIntent({ 'dt.query': query }, { recommendedAppId: 'dynatrace.notebooks', recommendedIntentId: 'open-with-dql' });
+    const q = query ?? buildDefaultDql(label);
+    sendIntent({ 'dt.query': q }, { recommendedAppId: 'dynatrace.notebooks', recommendedIntentId: 'open-with-dql' });
   };
   const doDimension = () => {
     setMenuOpen(false);
@@ -748,7 +777,7 @@ export function KpiCard({
           >
             <button className="kpi-action-btn" onClick={doForecast}>📈 Forecast</button>
             <button className="kpi-action-btn" onClick={doRelated}>⟷ Related Metrics</button>
-            {query && <button className="kpi-action-btn" onClick={doOpenNotebook}>↗ Open with...</button>}
+            <button className="kpi-action-btn" onClick={doOpenNotebook}>↗ Open with...</button>
             {kpiMenuCtx && <button className="kpi-action-btn" onClick={doDimension}>🌍 Dimension</button>}
             {kpiMenuCtx && <button className="kpi-action-btn" onClick={doHeatmap}>📅 Heatmap</button>}
             <div className="kpi-action-sep" />

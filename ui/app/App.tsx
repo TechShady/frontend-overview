@@ -26,7 +26,7 @@ import { useDql } from "./useDql";
 import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
 import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
 import { KpiMenuContext, KpiMenuContextValue } from "./components/KpiMenuContext";
-import { DimensionModal } from "./components/DimensionModal";
+import { DimensionModal, DimSlice } from "./components/DimensionModal";
 import { KpiHeatmapPanel } from "./components/KpiHeatmapPanel";
 import { HotnessAssistButton, HotnessAssistPanel, analyzeHotnessTimelapse, HotnessAssistData } from "./components/HotnessAssist";
 import { ForecastModal } from "./components/ForecastModal";
@@ -1022,7 +1022,7 @@ const AppInner: React.FC = () => {
     };
   });
   const [forecastModal, setForecastModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
-  const [dimensionModal, setDimensionModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
+  const [dimensionModal, setDimensionModal] = useState<{ label: string; sparkline: number[]; color?: string; fetchGeo?: (pct: string) => Promise<DimSlice[]>; fetchBrowser?: (pct: string) => Promise<DimSlice[]> } | null>(null);
   const [kpiHeatmapPanel, setKpiHeatmapPanel] = useState<{ label: string; color?: string; getRequeryData: (days: number) => Promise<{ values: number[]; bucketMs: number; unit?: string }> } | null>(null);
   const [kpiHeatmapPos, setKpiHeatmapPos] = useState<{ x: number; y: number }>({ x: 320, y: 120 });
   const kpiHeatmapDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -1037,12 +1037,83 @@ const AppInner: React.FC = () => {
     document.addEventListener("mouseup", up);
   }, [kpiHeatmapPos]);
   const kpiMenuContextValue = useMemo<KpiMenuContextValue>(() => ({
-    openDimension: (opts) => setDimensionModal({ label: opts.label, sparkline: opts.sparkline ?? [], color: opts.color }),
+    openDimension: ({ label: lbl, sparkline: sp, color: col }) => {
+      const upper = lbl.toUpperCase();
+      const vitalMap: Array<[RegExp, string, number]> = [
+        [/\bLCP\b|LARGEST CONTENTFUL PAINT/, "web_vitals.largest_contentful_paint", 1e6],
+        [/\bFCP\b|FIRST CONTENTFUL PAINT/, "web_vitals.first_contentful_paint", 1e6],
+        [/\bCLS\b|CUMULATIVE LAYOUT SHIFT/, "web_vitals.cumulative_layout_shift", 1],
+        [/\bINP\b|INTERACTION TO NEXT PAINT/, "web_vitals.interaction_to_next_paint", 1e6],
+        [/\bTTFB\b|TIME TO FIRST BYTE/, "web_vitals.time_to_first_byte", 1e6],
+        [/\bFID\b|FIRST INPUT DELAY/, "web_vitals.first_input_delay", 1e6],
+      ];
+      const vitalEntry = vitalMap.find(([pat]) => pat.test(upper));
+      const vitalField = vitalEntry ? vitalEntry[1] : null;
+      const vitalDivisor = vitalEntry ? vitalEntry[2] : 1e9;
+      const isErrorRate = upper.includes("ERROR");
+      const isBounceRate = upper.includes("BOUNCE") || upper.includes("EXIT");
+      const isDuration = !vitalField && !isErrorRate && !isBounceRate && (upper.includes("DURATION") || upper.includes("LOAD") || upper.includes("TIME"));
+      const unit: string | undefined = vitalField === "web_vitals.cumulative_layout_shift" ? "" : (vitalField || isDuration) ? "s" : (isErrorRate || isBounceRate) ? "%" : undefined;
+      const vitalFilter = vitalField ? `\n| filter isNotNull(${vitalField}) and toDouble(${vitalField}) > 0` : "";
+      const appFilt = webAppFilter.selected && webAppFilter.selected.length > 0
+        ? `\n| filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
+        : "";
+      const buildMetricExpr = (pct: string, field: string, divisor: number) => {
+        const p = parseInt(pct.replace(/\D/g, ""), 10);
+        const aggFn = isNaN(p) ? `avg(toDouble(${field}))` : `percentile(toDouble(${field}), ${p})`;
+        return divisor !== 1 ? `${aggFn} / ${divisor}` : aggFn;
+      };
+      const runQuery = async (q: string) => {
+        const start = await queryExecutionClient.queryExecute({ body: { query: q, requestTimeoutMilliseconds: 60000, maxResultRecords: 1000 } });
+        if (start.state === "SUCCEEDED") return (start.result?.records ?? []) as any[];
+        const token = start.requestToken;
+        if (!token) return [];
+        for (let i = 0; i < 60; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          const poll = await queryExecutionClient.queryPoll({ requestToken: token });
+          if (poll.state === "SUCCEEDED") return (poll.result?.records ?? []) as any[];
+          if (poll.state === "FAILED" || poll.state === "CANCELLED") return [];
+        }
+        return [];
+      };
+      const fetchGeo = async (pct: string): Promise<DimSlice[]> => {
+        try {
+          const metricExpr = vitalField
+            ? `, avgVal = ${buildMetricExpr(pct, vitalField, vitalDivisor)}`
+            : isDuration ? `, avgVal = ${buildMetricExpr(pct, "duration", 1e9)}` : "";
+          let q: string;
+          if (isErrorRate) {
+            q = `fetch user.events, from: now()-${timeframeDays}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(geo.country.name)\n| summarize count = count(), errors = countIf(characteristics.has_error == true), by: {country = geo.country.name}\n| fieldsAdd avgVal = if(count > 0, toDouble(errors) / toDouble(count) * 100.0, else: 0.0)\n| sort count desc\n| limit 8`;
+          } else {
+            q = `fetch user.events, from: now()-${timeframeDays}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(geo.country.name)${vitalFilter}\n| summarize count = count()${metricExpr}, by: {country = geo.country.name}\n| sort count desc\n| limit 8`;
+          }
+          const recs = await runQuery(q);
+          return recs.map((r: any) => ({ name: String(r.country ?? "Unknown"), value: Number(r.count ?? 0), avg: r.avgVal != null ? Number(r.avgVal) : undefined, unit }));
+        } catch { return []; }
+      };
+      const fetchBrowser = async (pct: string): Promise<DimSlice[]> => {
+        try {
+          const metricExpr = vitalField
+            ? `, avgVal = ${buildMetricExpr(pct, vitalField, vitalDivisor)}`
+            : isDuration ? `, avgVal = ${buildMetricExpr(pct, "duration", 1e9)}` : "";
+          let q: string;
+          if (isErrorRate) {
+            q = `fetch user.events, from: now()-${timeframeDays}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(browser.name)\n| summarize count = count(), errors = countIf(characteristics.has_error == true), by: {browser = browser.name}\n| fieldsAdd avgVal = if(count > 0, toDouble(errors) / toDouble(count) * 100.0, else: 0.0)\n| sort count desc\n| limit 6`;
+          } else {
+            q = `fetch user.events, from: now()-${timeframeDays}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(browser.name)${vitalFilter}\n| summarize count = count()${metricExpr}, by: {browser = browser.name}\n| sort count desc\n| limit 6`;
+          }
+          const recs = await runQuery(q);
+          return recs.map((r: any) => ({ name: String(r.browser ?? "Unknown"), value: Number(r.count ?? 0), avg: r.avgVal != null ? Number(r.avgVal) : undefined, unit }));
+        } catch { return []; }
+      };
+      setDimensionModal({ label: lbl, sparkline: sp ?? [], color: col, fetchGeo, fetchBrowser });
+    },
     openHeatmap: (opts) => {
       const getData = opts.getRequeryData ?? (async (_days: number) => ({ values: opts.sparkline ?? [], bucketMs: 3_600_000 }));
       setKpiHeatmapPanel({ label: opts.label, color: opts.color, getRequeryData: getData });
     },
-  }), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [webAppFilter, timeframeDays]);
   // Correlations: KpiCards auto-register their sparklines here; the panel opens on "Related Metrics".
   // Registry is keyed by label (last write wins) so we always show the freshest sparkline.
   const [correlationsRegistry, setCorrelationsRegistry] = useState<Record<string, RelatedMetricEntry>>({});
@@ -1373,6 +1444,8 @@ const AppInner: React.FC = () => {
           label={dimensionModal.label}
           color={dimensionModal.color}
           onClose={() => setDimensionModal(null)}
+          fetchGeo={dimensionModal.fetchGeo}
+          fetchBrowser={dimensionModal.fetchBrowser}
         />
       )}
 
