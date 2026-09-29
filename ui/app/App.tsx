@@ -1153,21 +1153,21 @@ const AppInner: React.FC = () => {
             ? `\n| filter isNotNull(${field})`
             : `\n| filter isNotNull(${field}) and toDouble(${field}) > 0`;
           const expr = divisor !== 1 ? `avg(toDouble(${field})) / ${divisor}` : `avg(toDouble(${field}))`;
-          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}${vFilt}\n| summarize avg_val = ${expr}, by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}${vFilt}\n| summarize avg_val = ${expr}, by: { bkt = bin(start_time, 1h) }\n| sort bkt asc\n| fields bkt, avg_val`;
         } else if (isErrorRate) {
           unit = "%";
-          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize errors = countIf(characteristics.has_error == true), total = count(), by: { hour_bin = bin(timestamp, 1h) }\n| fieldsAdd avg_val = if(total > 0, toDouble(errors) / toDouble(total) * 100.0, else: 0.0)\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize errors = countIf(characteristics.has_error == true), total = count(), by: { bkt = bin(start_time, 1h) }\n| fieldsAdd avg_val = if(total > 0, toDouble(errors) / toDouble(total) * 100.0, else: 0.0)\n| sort bkt asc\n| fields bkt, avg_val`;
         } else if (isDuration) {
           unit = "s";
-          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(duration) and toDouble(duration) > 0\n| summarize avg_val = avg(toDouble(duration)) / 1e9, by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(duration) and toDouble(duration) > 0\n| summarize avg_val = avg(toDouble(duration)) / 1e9, by: { bkt = bin(start_time, 1h) }\n| sort bkt asc\n| fields bkt, avg_val`;
         } else {
           // Fallback: session/action count per hour
-          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize avg_val = toDouble(count()), by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize avg_val = toDouble(count()), by: { bkt = bin(start_time, 1h) }\n| sort bkt asc\n| fields bkt, avg_val`;
         }
         const recs = await runHeatmapQuery(q);
         const dense = new Array(totalSlots).fill(NaN);
         for (const rec of recs) {
-          const tsRaw = rec.hour_bin;
+          const tsRaw = rec.bkt;
           const ts = tsRaw instanceof Date ? tsRaw.getTime() : typeof tsRaw === "string" ? new Date(tsRaw).getTime() : Number(tsRaw);
           const slot = Math.round((ts - startMs) / BUCKET);
           if (slot >= 0 && slot < totalSlots && rec.avg_val != null && isFinite(Number(rec.avg_val))) {
