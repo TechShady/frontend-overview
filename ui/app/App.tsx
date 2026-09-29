@@ -1108,9 +1108,75 @@ const AppInner: React.FC = () => {
       };
       setDimensionModal({ label: lbl, sparkline: sp ?? [], color: col, fetchGeo, fetchBrowser });
     },
-    openHeatmap: (opts) => {
-      const getData = opts.getRequeryData ?? (async (_days: number) => ({ values: opts.sparkline ?? [], bucketMs: 3_600_000 }));
-      setKpiHeatmapPanel({ label: opts.label, color: opts.color, getRequeryData: getData });
+    openHeatmap: ({ label: lbl, color: col }) => {
+      const upper = lbl.toUpperCase();
+      const vitalMap: Array<[RegExp, string, number, string]> = [
+        [/\bLCP\b|LARGEST CONTENTFUL PAINT/, "web_vitals.largest_contentful_paint", 1e6, "s"],
+        [/\bFCP\b|FIRST CONTENTFUL PAINT/, "web_vitals.first_contentful_paint", 1e6, "s"],
+        [/\bCLS\b|CUMULATIVE LAYOUT SHIFT/, "web_vitals.cumulative_layout_shift", 1, ""],
+        [/\bINP\b|INTERACTION TO NEXT PAINT/, "web_vitals.interaction_to_next_paint", 1e6, "s"],
+        [/\bTTFB\b|TIME TO FIRST BYTE/, "web_vitals.time_to_first_byte", 1e6, "s"],
+        [/\bFID\b|FIRST INPUT DELAY/, "web_vitals.first_input_delay", 1e6, "s"],
+      ];
+      const vitalEntry = vitalMap.find(([pat]) => pat.test(upper));
+      const isErrorRate = /ERROR/.test(upper);
+      const isDuration = !vitalEntry && !isErrorRate && /DURATION|LOAD\s*TIME|LOAD\s*EVENT/.test(upper);
+      const appFilt = webAppFilter.selected && webAppFilter.selected.length > 0
+        ? `\n| filter in(frontend.name, ${webAppFilter.selected.map((s: string) => `"${s}"`).join(", ")})`
+        : "";
+      const runHeatmapQuery = async (q: string) => {
+        try {
+          const start = await queryExecutionClient.queryExecute({ body: { query: q, requestTimeoutMilliseconds: 60000, maxResultRecords: 10000 } });
+          if (start.state === "SUCCEEDED") return (start.result?.records ?? []) as any[];
+          const token = start.requestToken;
+          if (!token) return [];
+          for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const poll = await queryExecutionClient.queryPoll({ requestToken: token });
+            if (poll.state === "SUCCEEDED") return (poll.result?.records ?? []) as any[];
+            if (poll.state === "FAILED" || poll.state === "CANCELLED") return [];
+          }
+        } catch { /* silent */ }
+        return [];
+      };
+      const getRequeryData = async (days: number): Promise<{ values: number[]; bucketMs: number; unit?: string }> => {
+        const BUCKET = 3_600_000;
+        const totalSlots = days * 24;
+        const nowMs = Date.now();
+        const startMs = nowMs - totalSlots * BUCKET;
+        let unit: string | undefined;
+        let q: string;
+        if (vitalEntry) {
+          const [, field, divisor, u] = vitalEntry;
+          unit = u || undefined;
+          const vFilt = field === "web_vitals.cumulative_layout_shift"
+            ? `\n| filter isNotNull(${field})`
+            : `\n| filter isNotNull(${field}) and toDouble(${field}) > 0`;
+          const expr = divisor !== 1 ? `avg(toDouble(${field})) / ${divisor}` : `avg(toDouble(${field}))`;
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}${vFilt}\n| summarize avg_val = ${expr}, by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+        } else if (isErrorRate) {
+          unit = "%";
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize errors = countIf(characteristics.has_error == true), total = count(), by: { hour_bin = bin(timestamp, 1h) }\n| fieldsAdd avg_val = if(total > 0, toDouble(errors) / toDouble(total) * 100.0, else: 0.0)\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+        } else if (isDuration) {
+          unit = "s";
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| filter isNotNull(duration) and toDouble(duration) > 0\n| summarize avg_val = avg(toDouble(duration)) / 1e9, by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+        } else {
+          // Fallback: session/action count per hour
+          q = `fetch user.events, from: now()-${days}d\n| filter isNotNull(frontend.name)${appFilt}\n| summarize avg_val = toDouble(count()), by: { hour_bin = bin(timestamp, 1h) }\n| sort hour_bin asc\n| fields hour_bin, avg_val`;
+        }
+        const recs = await runHeatmapQuery(q);
+        const dense = new Array(totalSlots).fill(NaN);
+        for (const rec of recs) {
+          const tsRaw = rec.hour_bin;
+          const ts = tsRaw instanceof Date ? tsRaw.getTime() : typeof tsRaw === "string" ? new Date(tsRaw).getTime() : Number(tsRaw);
+          const slot = Math.round((ts - startMs) / BUCKET);
+          if (slot >= 0 && slot < totalSlots && rec.avg_val != null && isFinite(Number(rec.avg_val))) {
+            dense[slot] = Number(rec.avg_val);
+          }
+        }
+        return { values: dense, bucketMs: BUCKET, unit };
+      };
+      setKpiHeatmapPanel({ label: lbl, color: col, getRequeryData });
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [webAppFilter, timeframeDays]);

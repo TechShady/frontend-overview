@@ -55,6 +55,7 @@ function buildGrid(values: number[], bucketMs: number): (number | null)[][] {
   const cnts = Array.from({ length: 7 }, () => new Array(24).fill(0));
   const startMs = Date.now() - values.length * bucketMs;
   for (let i = 0; i < values.length; i++) {
+    if (!isFinite(values[i])) continue; // NaN = no data for this slot
     const d = new Date(startMs + i * bucketMs);
     sums[d.getDay()][d.getHours()] += values[i];
     cnts[d.getDay()][d.getHours()]++;
