@@ -4,6 +4,7 @@ import { sendIntent } from "@dynatrace-sdk/navigation";
 import { Text, Heading } from "@dynatrace/strato-components/typography";
 import { ProgressCircle } from "@dynatrace/strato-components/content";
 import { useKpiMenu } from "./KpiMenuContext";
+import { CorrelationsContext } from "./CorrelationsPanel";
 import "./kpi-card.css";
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ export const ForecastContext = React.createContext<ForecastOpener | null>(null);
 export const ForecastProvider = ForecastContext.Provider;
 
 // ---------------------------------------------------------------------------
-// Related-metrics correlations panel (minimal port).
+// Related-metrics correlations panel — type alias kept for App.tsx compatibility.
 // ---------------------------------------------------------------------------
 export interface RelatedMetricEntry {
   label: string;
@@ -30,11 +31,6 @@ export interface RelatedMetricEntry {
   inverted?: boolean;
 }
 export type CorrelationOpener = (target: RelatedMetricEntry) => void;
-export const CorrelationsContext = React.createContext<{
-  registry: RelatedMetricEntry[];
-  register: (metrics: RelatedMetricEntry[]) => void;
-  open: CorrelationOpener;
-} | null>(null);
 
 // ---------------------------------------------------------------------------
 // Interactive sparkline with hover crosshair + value tooltip

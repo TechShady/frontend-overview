@@ -24,7 +24,7 @@ import { TimelapseProvider, useTimelapse, TL_BUCKETS, TL_SPEEDS, TL_BUCKET_MS, S
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { useDql } from "./useDql";
 import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
-import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
+import { ForecastProvider, ForecastOpener, RelatedMetricEntry } from "./components/KpiCard";
 import { KpiMenuContext, KpiMenuContextValue } from "./components/KpiMenuContext";
 import { DimensionModal, DimSlice } from "./components/DimensionModal";
 import { KpiHeatmapPanel } from "./components/KpiHeatmapPanel";
@@ -34,7 +34,7 @@ import { HotnessForecastPanel } from "./components/HotnessForecastPanel";
 import { HotnessCalendarPanel } from "./components/HotnessCalendarPanel";
 import { PersonaPickerModal } from "./components/PersonaPickerModal";
 import type { PersonaDef } from "./components/PersonaPickerModal";
-import { CorrelationsPanel } from "./components/CorrelationsPanel";
+import { CorrelationsPanel, CorrelationsContext } from "./components/CorrelationsPanel";
 import { AIInsightsContext } from "./components/AIInsights";
 import appConfig from "../../app.config.json";
 
@@ -1322,7 +1322,7 @@ const AppInner: React.FC = () => {
       {correlationsTarget && (
         <CorrelationsPanel
           target={correlationsTarget}
-          registry={correlationsCtxValue.registry}
+          allMetrics={correlationsCtxValue.registry}
           onClose={() => setCorrelationsTarget(null)}
         />
       )}
