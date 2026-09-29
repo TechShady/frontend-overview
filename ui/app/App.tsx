@@ -25,6 +25,9 @@ import { DisclaimerModal } from "./components/DisclaimerModal";
 import { useDql } from "./useDql";
 import { webAppInventoryQuery, sharedTimelapseMetricsQuery } from "./queries";
 import { ForecastProvider, ForecastOpener, CorrelationsContext, RelatedMetricEntry } from "./components/KpiCard";
+import { KpiMenuContext, KpiMenuContextValue } from "./components/KpiMenuContext";
+import { DimensionModal } from "./components/DimensionModal";
+import { KpiHeatmapPanel } from "./components/KpiHeatmapPanel";
 import { HotnessAssistButton, HotnessAssistPanel, analyzeHotnessTimelapse, HotnessAssistData } from "./components/HotnessAssist";
 import { ForecastModal } from "./components/ForecastModal";
 import { HotnessForecastPanel } from "./components/HotnessForecastPanel";
@@ -1019,6 +1022,27 @@ const AppInner: React.FC = () => {
     };
   });
   const [forecastModal, setForecastModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
+  const [dimensionModal, setDimensionModal] = useState<{ label: string; sparkline: number[]; color?: string } | null>(null);
+  const [kpiHeatmapPanel, setKpiHeatmapPanel] = useState<{ label: string; color?: string; getRequeryData: (days: number) => Promise<{ values: number[]; bucketMs: number; unit?: string }> } | null>(null);
+  const [kpiHeatmapPos, setKpiHeatmapPos] = useState<{ x: number; y: number }>({ x: 320, y: 120 });
+  const kpiHeatmapDragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const startKpiHeatmapDrag = useCallback((e: React.MouseEvent) => {
+    kpiHeatmapDragRef.current = { startX: e.clientX, startY: e.clientY, origX: kpiHeatmapPos.x, origY: kpiHeatmapPos.y };
+    const move = (me: MouseEvent) => {
+      if (!kpiHeatmapDragRef.current) return;
+      setKpiHeatmapPos({ x: kpiHeatmapDragRef.current.origX + me.clientX - kpiHeatmapDragRef.current.startX, y: kpiHeatmapDragRef.current.origY + me.clientY - kpiHeatmapDragRef.current.startY });
+    };
+    const up = () => { kpiHeatmapDragRef.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }, [kpiHeatmapPos]);
+  const kpiMenuContextValue = useMemo<KpiMenuContextValue>(() => ({
+    openDimension: (opts) => setDimensionModal({ label: opts.label, sparkline: opts.sparkline ?? [], color: opts.color }),
+    openHeatmap: (opts) => {
+      const getData = opts.getRequeryData ?? (async (_days: number) => ({ values: opts.sparkline ?? [], bucketMs: 3_600_000 }));
+      setKpiHeatmapPanel({ label: opts.label, color: opts.color, getRequeryData: getData });
+    },
+  }), []);
   // Correlations: KpiCards auto-register their sparklines here; the panel opens on "Related Metrics".
   // Registry is keyed by label (last write wins) so we always show the freshest sparkline.
   const [correlationsRegistry, setCorrelationsRegistry] = useState<Record<string, RelatedMetricEntry>>({});
@@ -1196,6 +1220,7 @@ const AppInner: React.FC = () => {
         onChangeTimeframe={handleTimeframeChange}
       />
       <ForecastProvider value={openForecast}>
+        <KpiMenuContext.Provider value={kpiMenuContextValue}>
         <CorrelationsContext.Provider value={correlationsCtxValue}>
         <div style={{ padding: "0 8px" }}>
           {visibleTabs.length === 0 ? (
@@ -1217,6 +1242,7 @@ const AppInner: React.FC = () => {
           )}
         </div>
         </CorrelationsContext.Provider>
+        </KpiMenuContext.Provider>
       </ForecastProvider>
 
       <HelpSheet show={showHelp} onDismiss={() => setShowHelp(false)} />
@@ -1340,6 +1366,24 @@ const AppInner: React.FC = () => {
               return forecastModal.sparkline;
             }
           }}
+        />
+      )}
+      {dimensionModal && (
+        <DimensionModal
+          label={dimensionModal.label}
+          color={dimensionModal.color}
+          onClose={() => setDimensionModal(null)}
+        />
+      )}
+
+      {kpiHeatmapPanel && (
+        <KpiHeatmapPanel
+          label={kpiHeatmapPanel.label}
+          color={kpiHeatmapPanel.color}
+          pos={kpiHeatmapPos}
+          onDragStart={startKpiHeatmapDrag}
+          onClose={() => setKpiHeatmapPanel(null)}
+          getRequeryData={kpiHeatmapPanel.getRequeryData}
         />
       )}
     </AIInsightsContext.Provider>
