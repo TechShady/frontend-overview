@@ -855,7 +855,7 @@ ${breachAnalysis ? `
   </div>
 </div>` : ""}
 <div class="print-btn no-print">
-  <button class="print-action" onclick="window.print()">Print / Save PDF</button>
+
 </div>
 </body>
 </html>`;

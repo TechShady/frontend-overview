@@ -257,7 +257,7 @@ ${correlations.length === 0
   <div style="font-size:11px;opacity:0.5">Pearson correlation coefficient (r) measures linear relationship between two time-series sparklines. Values near +1 indicate strong positive co-movement; values near -1 indicate strong inverse movement. A green bar means the metrics move together; a red bar means they move in opposite directions. Relationships with |r| below the threshold are filtered out.</div>
 </div>
 <div class="print-btn no-print">
-  <button class="print-action" onclick="window.print()">Print / Save PDF</button>
+
 </div>
 </body>
 </html>`;

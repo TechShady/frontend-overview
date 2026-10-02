@@ -765,7 +765,7 @@ export const ExecutiveSummaryTab: React.FC = () => {
 </body></html>
     `;
     const w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); }
+    if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 400); }
   }, [sel, scoredRows, timeframeDays, grade, fleetScore, gradeMetrics, narrative, totals, fleetVitals, impactStats, whatChanged, reportCardRows]);
 
   return (

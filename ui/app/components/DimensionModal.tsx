@@ -247,7 +247,7 @@ button.print-action{padding:8px 24px;background:rgba(69,137,255,.85);color:#fff;
 </div>
 <div class="footer">Dimension Breakdown &middot; Frontend Overview</div>
 <div class="print-btn no-print">
-  <button class="print-action" onclick="window.print()">Print / Save PDF</button>
+
 </div>
 </body>
 </html>`;

@@ -51,8 +51,13 @@ function ensureHAStyles() {
 }
 .uj-ai-stream-word { display: inline; opacity: 0; animation: uj-ai-typewriter 0.3s ease forwards; }
 .uj-ai-section-title {
-  font-size: 12px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.6px; opacity: 0.5; margin-bottom: 8px;
+  font-size: 14px; font-weight: 800; letter-spacing: 0.2px; opacity: 1; color: rgba(255,255,255,0.88); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+}
+.uj-section-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 12px;
+  padding: 14px 16px;
 }
 .uj-ai-insight-row {
   display: flex; gap: 8px; align-items: flex-start;
@@ -159,6 +164,7 @@ export interface HotnessAssistData {
   driftSlope: number;
   driftLabel: "worsening" | "stable" | "improving";
   worstProblems?: Array<{ displayId?: string; title: string }>;
+  rootCauseNarrative: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +466,28 @@ export function analyzeHotnessTimelapse(
   const driftSlope = dn > 1 ? (dn * dSumXY - dSumX * dSumY) / (dn * dSumX2 - dSumX * dSumX) : 0;
   const driftLabel: "worsening" | "stable" | "improving" = driftSlope > 0.02 ? "worsening" : driftSlope < -0.02 ? "improving" : "stable";
 
+  // Root-cause narrative
+  const hasPerfIssue = errZ > 0.5 || durZ > 0.5 || lcpZ > 0.5;
+  let trafficClause = "";
+  if (hasPerfIssue) {
+    if (sessZ >= 1.0) {
+      trafficClause = `Session volume was significantly elevated (+${sessZ.toFixed(1)}σ) alongside performance degradation — load-induced pressure is the primary suspect.`;
+    } else if (sessZ >= 0.5) {
+      trafficClause = `Session volume was modestly elevated (+${sessZ.toFixed(1)}σ) — a contributing factor but likely not the sole driver.`;
+    } else {
+      trafficClause = `Session volume was within normal range during the worst window — the degradation is not traffic-driven, pointing to a deployment or infrastructure change.`;
+    }
+  }
+  let charClause = "";
+  if (errZ > 0.5 && (durZ > 0.5 || lcpZ > 0.5)) {
+    charClause = `Both error rates and latency indicators are simultaneously elevated — full degradation event, not an isolated symptom.`;
+  } else if (errZ > 0.5) {
+    charClause = `The degradation is error-driven with latency remaining relatively stable — consistent with a failure injection or bad release.`;
+  } else if (durZ > 0.5 || lcpZ > 0.5) {
+    charClause = `The degradation is latency-driven with errors stable — consistent with resource saturation, timeout drift, or upstream slowness.`;
+  }
+  const rootCauseNarrative = [trafficClause, charClause].filter(Boolean).join(" ");
+
   return {
     summary, worstIdx, worstBucketKey: worstRow.bucket, worstHotZ: worstZ, worstDriver,
     worstCwvVital: topCwv?.vital ?? null, worstCwvTeam: topCwv?.team ?? null, worstCwvAction: topCwv?.action ?? null,
@@ -473,6 +501,7 @@ export function analyzeHotnessTimelapse(
     errorRateDelta, durationDelta, lcpDelta, inpDelta, clsDelta, ttfbDelta,
     allHotness: hotness, insights, recommendations: recs,
     episodeCount, longestEpisodeBuckets, avgRecoveryBuckets, driftSlope, driftLabel,
+    rootCauseNarrative,
   };
 }
 
@@ -627,7 +656,7 @@ export function HotnessAssistPanel({
   .pat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}.pat-card{border-radius:8px;padding:12px 14px;}
   .diff-table{width:100%;border-collapse:collapse;margin-bottom:20px;}.diff-table th{padding:5px 10px;font-size:10px;font-weight:700;opacity:0.5;text-transform:uppercase;border-bottom:1px solid rgba(128,128,128,0.2);text-align:left;}.diff-table td{padding:5px 10px;font-size:12px;border-bottom:1px solid rgba(128,128,128,0.08);}
 </style></head><body>
-<div class="toolbar no-print"><button onclick="window.print()">Print / Save PDF</button></div>
+
 <h1>🔥 Hotness Assist Report — Frontend Overview</h1>
 <div style="font-size:11px;color:#888;margin-bottom:20px">${data.allHotness.length} buckets · ${data.hotBuckets} elevated · ${data.criticalBuckets} critical · pattern: ${patternLabel} · ${burstLabel} | ${ts}</div>
 <h2>Summary</h2><p style="font-size:13px;line-height:1.6;margin:0 0 20px">${data.summary}</p>
@@ -742,7 +771,7 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
   const handleExportPdf = () => {
     const html = generateReportHtml();
     const win = window.open("", "_blank");
-    if (win) { win.document.write(html); win.document.close(); }
+    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 400); }
   };
 
   return createPortal(
@@ -780,10 +809,15 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
       <div style={{ overflowY: "auto", flex: 1, padding: "14px 16px" }}>
 
         {/* Summary */}
-        <div style={{ marginBottom: 14 }}>
-          <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: "100ms" }}>Summary</div>
+        <div className="uj-section-card" style={{ marginBottom: 14 }}>
+          <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: "100ms" }}>🔥 Summary</div>
           <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(255,107,53,0.05)", border: "1px solid rgba(255,107,53,0.15)" }}>
             <StreamText text={data.summary} baseDelay={200} style={{ fontSize: 13, lineHeight: "1.6" }} />
+            {data.rootCauseNarrative && (
+              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.75, marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,107,53,0.15)" }}>
+                {data.rootCauseNarrative}
+              </div>
+            )}
           </div>
         </div>
 
@@ -804,8 +838,8 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
         </div>
 
         {/* Hotness mini-chart */}
-        <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${chartDelay}ms` }}>
-          <div className="uj-ai-section-title">Hotness Timeline — Full Period</div>
+        <div className="uj-section-card" style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${chartDelay}ms` }}>
+          <div className="uj-ai-section-title">📊 Hotness Timeline — Full Period</div>
           <div style={{ background: "rgba(128,128,128,0.04)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, padding: "8px 10px 6px" }}>
             <svg width="100%" height="130" viewBox={`0 0 ${chartW} 130`} preserveAspectRatio="none" style={{ display: "block" }}>
               {[{ z: 0.75, color: TL_HOT_ELEV }, { z: 1.5, color: TL_HOT_WARM }, { z: 2.5, color: TL_HOT_HIGH }].map(({ z, color }) => (
@@ -837,7 +871,9 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
         </div>
 
         {/* Alert Pattern + Burst type banner */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${patDelay}ms` }}>
+        <div className="uj-section-card" style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${patDelay}ms` }}>
+          <div className="uj-ai-section-title">🔍 Pattern Analysis</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <div style={{ background: `${patternColor}12`, border: `1px solid ${patternColor}40`, borderRadius: 8, padding: "8px 12px" }}>
             <div style={{ fontSize: 9, opacity: 0.55, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>Pattern Analysis</div>
             <div style={{ fontSize: 12, fontWeight: 700, color: patternColor }}>{patternLabel}</div>
@@ -856,6 +892,7 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
                data.burstType === "transient" ? "Appears self-resolved" : "No elevated buckets"}
             </div>
           </div>
+          </div>
         </div>
 
         {/* Spike Episodes + Recovery + Drift */}
@@ -866,7 +903,9 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
           const driftColor = data.driftLabel === "worsening" ? "#E00000" : data.driftLabel === "improving" ? "#10B981" : "#888";
           const cs: React.CSSProperties = { flex: 1, borderRadius: 8, padding: "9px 11px", display: "flex", flexDirection: "column", gap: 2 };
           return (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+            <div className="uj-section-card" style={{ marginBottom: 14 }}>
+              <div className="uj-ai-section-title">⚡ Spike Behavior</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               <div style={{ ...cs, background: `${epColor}0d`, border: `1px solid ${epColor}30` }}>
                 <div style={{ fontSize: 9, fontWeight: 700, opacity: 0.5, textTransform: "uppercase" as const, letterSpacing: 0.8 }}>Spike Episodes</div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: epColor }}>{data.episodeCount}</div>
@@ -883,11 +922,13 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
                 <div style={{ fontSize: 10, opacity: 0.6 }}>{`${data.driftSlope >= 0 ? "+" : ""}${data.driftSlope.toFixed(3)}Z/bucket`}</div>
               </div>
             </div>
+            </div>
           );
         })()}
 
-        {/* What's Different — W1 vs B1 title above cards */}
-        <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${cardsDelay - 150}ms` }}>What's Different — Worst #1 vs Best #1</div>
+        {/* What's Different — W1 vs B1 */}
+        <div className="uj-section-card" style={{ marginBottom: 14 }}>
+        <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${cardsDelay - 150}ms` }}>⚖️ What's Different — Worst #1 vs Best #1</div>
 
         {/* Pair 1: W1 vs B1 */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${cardsDelay}ms` }}>
@@ -968,6 +1009,7 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
             </div>
           </div>
         </div>
+        </div>
 
         {/* Pair 2: W1 vs W2 + Common Bad Signals */}
         {data.worst2Idx !== data.worstIdx && (() => {
@@ -981,8 +1023,8 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
             ...(w1.cls  != null && w2.cls  != null ? [{ label: "CLS",  v1: w1.cls.toFixed(3),           v2: w2.cls.toFixed(3),           z1: data.worstHotZ, z2: data.worst2HotZ, bothHot: w1.cls  > 0.1  && w2.cls  > 0.1  }] : []),
             ...(w1.ttfb != null && w2.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(w1.ttfb)}ms`, v2: `${Math.round(w2.ttfb)}ms`, z1: data.worstHotZ, z2: data.worst2HotZ, bothHot: w1.ttfb > 800  && w2.ttfb > 800  }] : []),
           ];
-          return (<>
-            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 50}ms` }}>Common Bad Signals — Worst #1 vs Worst #2</div>
+          return (<div className="uj-section-card" style={{ marginBottom: 14 }}>
+            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 50}ms` }}>🔴 Common Bad Signals — Worst #1 vs Worst #2</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 200}ms` }}>
               {/* W1 */}
               <div style={{ background: "rgba(255,7,58,0.05)", border: "1px solid rgba(255,7,58,0.2)", borderRadius: 8, padding: "10px 12px" }}>
@@ -1044,7 +1086,7 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
                 </div>
               </div>
             </div>
-          </>);
+          </div>);
         })()}
 
         {/* Pair 3: B1 vs B2 + Common Good Signals */}
@@ -1059,8 +1101,8 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
             ...(b1.cls  != null && b2.cls  != null ? [{ label: "CLS",  v1: b1.cls.toFixed(3),           v2: b2.cls.toFixed(3),           bothHealthy: b1.cls  <= 0.1  && b2.cls  <= 0.1  }] : []),
             ...(b1.ttfb != null && b2.ttfb != null ? [{ label: "TTFB", v1: `${Math.round(b1.ttfb)}ms`, v2: `${Math.round(b2.ttfb)}ms`, bothHealthy: b1.ttfb <= 800  && b2.ttfb <= 800  }] : []),
           ];
-          return (<>
-            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 250}ms` }}>Common Good Signals — Best #1 vs Best #2</div>
+          return (<div className="uj-section-card" style={{ marginBottom: 14 }}>
+            <div className="uj-ai-section-title" style={{ marginBottom: 6, opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${tableDelay + 250}ms` }}>✅ Common Good Signals — Best #1 vs Best #2</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${tableDelay + 400}ms` }}>
               {/* B1 */}
               <div style={{ background: "rgba(13,156,41,0.04)", border: "1px solid rgba(13,156,41,0.2)", borderRadius: 8, padding: "10px 12px" }}>
@@ -1122,13 +1164,13 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
                 </div>
               </div>
             </div>
-          </>);
+          </div>);
         })()}
 
         {/* CWV Budget Heatmap */}
         {(data.cwvBudget.lcp.good + data.cwvBudget.lcp.needs + data.cwvBudget.lcp.poor +
           data.cwvBudget.inp.good + data.cwvBudget.inp.needs + data.cwvBudget.inp.poor) > 0 && (
-          <div style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${budgetDelay}ms` }}>
+          <div className="uj-section-card" style={{ marginBottom: 14, opacity: 0, animation: "uj-ai-typewriter 0.4s ease forwards", animationDelay: `${budgetDelay}ms` }}>
             <div className="uj-ai-section-title">CWV Budget — Full Period Distribution</div>
             <div style={{ background: "rgba(128,128,128,0.03)", border: "1px solid rgba(128,128,128,0.12)", borderRadius: 8, padding: "10px 12px" }}>
               {(["lcp", "inp", "cls", "ttfb"] as const).map(vital => {
@@ -1165,8 +1207,8 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
 
         {/* Insights */}
         {data.insights.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${insightOffset - 200}ms` }}>Insights</div>
+          <div className="uj-section-card" style={{ marginBottom: 14 }}>
+            <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${insightOffset - 200}ms` }}>💡 Insights</div>
             {data.insights.map((ins, i) => {
               const myOffset = insightOffset;
               insightOffset += insightDurations[i] + 240;
@@ -1182,8 +1224,8 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
 
         {/* Recommendations */}
         {data.recommendations.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${insightOffset}ms` }}>Recommendations</div>
+          <div className="uj-section-card" style={{ marginBottom: 12 }}>
+            <div className="uj-ai-section-title" style={{ opacity: 0, animation: "uj-ai-typewriter 0.3s ease forwards", animationDelay: `${insightOffset}ms` }}>🎯 Recommendations</div>
             {data.recommendations.map((rec, i) => {
               const myOffset = insightOffset + 300 + i * 800;
               return (
@@ -1196,10 +1238,23 @@ ${data.worstProblems && data.worstProblems.length > 0 ? `<h2>Active Davis Proble
           </div>
         )}
 
+        {/* Advanced Signals */}
+        {(data.criticalBuckets > 0) && (
+          <div className="uj-section-card" style={{ marginBottom: 12, borderColor: "rgba(255,131,43,0.3)" }}>
+            <div className="uj-ai-section-title">🧠 Advanced Signals</div>
+            {data.criticalBuckets > 0 && (
+              <div style={{ padding: "9px 12px", background: "rgba(255,7,58,0.06)", border: "1px solid rgba(255,7,58,0.2)", borderRadius: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#FF073A", marginRight: 8, textTransform: "uppercase" as const }}>SLO Breach</span>
+                <span style={{ fontSize: 12.5, color: "rgba(255,255,255,0.82)" }}>~{data.criticalBuckets * 5} min of critical-level degradation detected this session.</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Active Davis Problems */}
         {data.worstProblems && data.worstProblems.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <div className="uj-ai-section-title">Active Davis Problems During Worst Window</div>
+          <div className="uj-section-card" style={{ marginBottom: 12 }}>
+            <div className="uj-ai-section-title">⚠️ Active Davis Problems During Worst Window</div>
             <div style={{ background: "rgba(255,7,58,0.04)", border: "1px solid rgba(255,7,58,0.15)", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
               {data.worstProblems.map((p, i) => (
                 <div key={i} style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, padding: "2px 0", borderBottom: i < data.worstProblems!.length - 1 ? "1px solid rgba(128,128,128,0.08)" : "none" }}>

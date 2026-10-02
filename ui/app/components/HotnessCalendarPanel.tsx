@@ -18,6 +18,7 @@ const fmtHour = (h: number) =>
   h === 0 ? "12am" : h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`;
 
 type LevelKey = "nodata" | "baseline" | "low" | "warm" | "hot" | "spike";
+type HighlightMode = "hotzone" | "worstHour" | "worstDay" | null;
 
 const LEVELS: { key: LevelKey; label: string; color: string; min: number | null; tip: string }[] = [
   { key: "nodata",   label: "No Data",  color: "rgba(255,255,255,0.07)", min: null,      tip: "No recorded data for this hour × day slot" },
@@ -65,6 +66,9 @@ interface HeatAnalysis {
   worstHourText: string;
   hotCellCount: number;
   spikeCellCount: number;
+  hotHours: number[];
+  worstHourIdx: number;
+  worstDayIdx: number;
   insights: string[];
   recommendations: string[];
 }
@@ -145,7 +149,7 @@ function analyzeGrid(grid: (number | null)[][]): HeatAnalysis {
     hotZoneText,
     worstDayText:  `${DAYS[worstDayIdx]} (avg ${dayAvg[worstDayIdx].toFixed(2)}\\u03C3)`,
     worstHourText: `${fmtHour(worstHourIdx)} (avg ${hourAvg[worstHourIdx].toFixed(2)}\\u03C3)`,
-    hotCellCount, spikeCellCount, insights, recommendations: recs,
+    hotCellCount, spikeCellCount, hotHours, worstHourIdx, worstDayIdx, insights, recommendations: recs,
   };
 }
 
@@ -213,6 +217,7 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
   const [hover, setHover]               = React.useState<{ dow: number; hour: number; val: number | null } | null>(null);
   const [filterLevel, setFilterLevel]   = React.useState<LevelKey | null>(null);
   const [showAnalysis, setShowAnalysis] = React.useState(false);
+  const [highlightMode, setHighlightMode] = React.useState<HighlightMode>(null);
   const [panelH, setPanelH] = React.useState(520);
   const hmResizeRef = React.useRef<{ startY: number; startH: number } | null>(null);
 
@@ -237,10 +242,32 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grid     = React.useMemo(() => buildGrid(scores, bucketMs), [scores, bucketMs]);
-  const analysis = React.useMemo(() => showAnalysis ? analyzeGrid(grid) : null, [grid, showAnalysis]);
+  const analysis = React.useMemo(() => (showAnalysis || !!highlightMode) ? analyzeGrid(grid) : null, [grid, showAnalysis, highlightMode]);
 
   const toggleFilter = (key: LevelKey) => setFilterLevel(prev => prev === key ? null : key);
-  const cellOpacity  = (key: LevelKey) => filterLevel ? (key === filterLevel ? 1 : 0.1) : 1;
+  const highlightedHours = React.useMemo<Set<number>>(() => {
+    if (!analysis) return new Set();
+    if (highlightMode === "hotzone") return new Set(analysis.hotHours);
+    if (highlightMode === "worstHour") return new Set([analysis.worstHourIdx]);
+    return new Set();
+  }, [highlightMode, analysis]);
+  const highlightedDays = React.useMemo<Set<number>>(() => {
+    if (!analysis || highlightMode !== "worstDay") return new Set();
+    return new Set([analysis.worstDayIdx]);
+  }, [highlightMode, analysis]);
+  const isCellHighlighted = (dow: number, h: number): boolean => {
+    if (!highlightMode) return true;
+    if (highlightMode === "worstDay") return highlightedDays.has(dow);
+    return highlightedHours.has(h);
+  };
+  const cellOpacity = (key: LevelKey, dow: number, h: number) => {
+    if (!isCellHighlighted(dow, h)) return 0.07;
+    return filterLevel ? (key === filterLevel ? 1 : 0.1) : 1;
+  };
+  const handleCardClick = (mode: HighlightMode) => {
+    setHighlightMode(prev => prev === mode ? null : mode);
+    if (!showAnalysis) setShowAnalysis(true);
+  };
 
   const CELL_W = 28, CELL_H = 14, GAP = 2, LEFT_PAD = 42;
   const panelW = LEFT_PAD + 7 * (CELL_W + GAP) + 48;
@@ -296,7 +323,7 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
                   const key = getLevel(val);
                   const isHov = hover?.dow === dow && hover?.hour === h;
                   return (
-                    <div key={dow} style={{ width: CELL_W, height: CELL_H, borderRadius: 3, background: levelColor(key), opacity: cellOpacity(key), border: isHov ? "1px solid rgba(255,255,255,0.6)" : "1px solid transparent", boxSizing: "border-box", cursor: "default", transition: "opacity 0.12s ease, border 0.1s" }}
+                    <div key={dow} style={{ width: CELL_W, height: CELL_H, borderRadius: 3, background: levelColor(key), opacity: cellOpacity(key, dow, h), border: isHov ? "1px solid rgba(255,255,255,0.6)" : "1px solid transparent", boxSizing: "border-box", cursor: "default", transition: "opacity 0.12s ease, border 0.1s" }}
                       onMouseEnter={() => setHover({ dow, hour: h, val })} onMouseLeave={() => setHover(null)} />
                   );
                 })}
@@ -319,18 +346,18 @@ export function HotnessCalendarPanel({ heatScores, bucketMs, pos, onDragStart, o
             </div>
 
             {/* Analysis section */}
-            {showAnalysis && analysis && (
+            {(showAnalysis || !!highlightMode) && analysis && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 12 }}>
-                  <div style={{ background: "rgba(255,7,58,0.07)", border: "1px solid rgba(255,7,58,0.2)", borderRadius: 8, padding: "7px 10px" }}>
+                  <div onClick={() => handleCardClick("hotzone")} style={{ background: highlightMode === "hotzone" ? "rgba(255,7,58,0.18)" : "rgba(255,7,58,0.07)", border: `1px solid ${highlightMode === "hotzone" ? "rgba(255,7,58,0.5)" : "rgba(255,7,58,0.2)"}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", transition: "all 0.12s ease" }}>
                     <div style={{ fontSize: 9, opacity: 0.5, textTransform: "uppercase" as const, marginBottom: 2, letterSpacing: "0.04em" }}>Hot Zone</div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#FF3D9A" }}>{analysis.hotZoneText}</div>
                   </div>
-                  <div style={{ background: "rgba(255,131,43,0.07)", border: "1px solid rgba(255,131,43,0.2)", borderRadius: 8, padding: "7px 10px" }}>
+                  <div onClick={() => handleCardClick("worstHour")} style={{ background: highlightMode === "worstHour" ? "rgba(255,131,43,0.18)" : "rgba(255,131,43,0.07)", border: `1px solid ${highlightMode === "worstHour" ? "rgba(255,131,43,0.5)" : "rgba(255,131,43,0.2)"}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", transition: "all 0.12s ease" }}>
                     <div style={{ fontSize: 9, opacity: 0.5, textTransform: "uppercase" as const, marginBottom: 2, letterSpacing: "0.04em" }}>Worst Hour</div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#FF832B" }}>{analysis.worstHourText}</div>
                   </div>
-                  <div style={{ background: "rgba(255,240,77,0.07)", border: "1px solid rgba(255,240,77,0.2)", borderRadius: 8, padding: "7px 10px" }}>
+                  <div onClick={() => handleCardClick("worstDay")} style={{ background: highlightMode === "worstDay" ? "rgba(255,240,77,0.18)" : "rgba(255,240,77,0.07)", border: `1px solid ${highlightMode === "worstDay" ? "rgba(255,240,77,0.5)" : "rgba(255,240,77,0.2)"}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", transition: "all 0.12s ease" }}>
                     <div style={{ fontSize: 9, opacity: 0.5, textTransform: "uppercase" as const, marginBottom: 2, letterSpacing: "0.04em" }}>Worst Day</div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#FFF04D" }}>{analysis.worstDayText}</div>
                   </div>
